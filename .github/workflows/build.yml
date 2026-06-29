@@ -3,10 +3,9 @@ name: 构建与发布
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
-  release:
-    types: [published]
 
 permissions:
   contents: write
@@ -34,9 +33,9 @@ jobs:
           name: qxfMCAI-Forge-1.20.1
           path: build/libs/*.jar
           if-no-files-found: error
-      - name: 添加到 GitHub 发行版
-        if: github.event_name == 'release'
+      - name: 创建 GitHub 发行版并添加 jar
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: build/libs/*.jar
-
+          generate_release_notes: true
