@@ -1,0 +1,42 @@
+name: 构建与发布
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 配置 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+      - name: 构建模组
+        run: gradle build --stacktrace
+      - name: 保存构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: qxfMCAI-Forge-1.20.1
+          path: build/libs/*.jar
+          if-no-files-found: error
+      - name: 添加到 GitHub 发行版
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/*.jar
+
