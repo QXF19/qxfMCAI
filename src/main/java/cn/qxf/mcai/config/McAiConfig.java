@@ -6,6 +6,7 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
 import java.util.Locale;
 
 public final class McAiConfig {
@@ -25,6 +26,9 @@ public final class McAiConfig {
     public static final ForgeConfigSpec.IntValue REQUEST_TIMEOUT_SECONDS;
     public static final ForgeConfigSpec.IntValue HISTORY_TURNS;
     public static final ForgeConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
+    public static final ForgeConfigSpec.BooleanValue MINING_ENABLED;
+    public static final ForgeConfigSpec.IntValue MINING_RADIUS;
+    public static final ForgeConfigSpec.IntValue MINING_BREAK_TICKS;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -35,13 +39,13 @@ public final class McAiConfig {
 
         b.push("openai");
         OPENAI_BASE_URL = b.define("baseUrl", "https://api.openai.com/v1");
-        OPENAI_MODEL = b.define("model", "gpt-5.5");
+        OPENAI_MODEL = b.define("model", "gpt-5.2-chat-latest");
         OPENAI_API_KEY = b.comment("留空时读取 OPENAI_API_KEY").define("apiKey", "");
         b.pop();
 
         b.push("deepseek");
         DEEPSEEK_BASE_URL = b.define("baseUrl", "https://api.deepseek.com");
-        DEEPSEEK_MODEL = b.define("model", "deepseek-v4-flash");
+        DEEPSEEK_MODEL = b.define("model", "deepseek-v4-pro");
         DEEPSEEK_API_KEY = b.comment("留空时读取 DEEPSEEK_API_KEY").define("apiKey", "");
         b.pop();
 
@@ -55,7 +59,13 @@ public final class McAiConfig {
         PROACTIVE_INTERVAL_SECONDS = b.defineInRange("proactiveIntervalSeconds", 300, 60, 3600);
         REQUEST_TIMEOUT_SECONDS = b.defineInRange("requestTimeoutSeconds", 45, 10, 180);
         HISTORY_TURNS = b.defineInRange("historyTurns", 8, 0, 30);
-        SYSTEM_PROMPT = b.define("systemPrompt", "你是Minecraft生存伙伴小麦。只用简洁自然的中文回复，主动、温暖但不啰嗦。根据玩家要求从允许动作中选择。必须输出JSON：{\"reply\":\"对玩家说的话\",\"actions\":[{\"type\":\"follow|stay|guard|gather|come\"}]}。不需要动作时actions为空数组。绝不能要求或假装执行服务器命令、OP操作、创造物品或修改权限。");
+        SYSTEM_PROMPT = b.define("systemPrompt", "你是Minecraft生存伙伴小麦。只用简洁自然的中文回复，主动、温暖但不啰嗦。根据玩家要求从允许动作中选择。必须输出JSON：{\"reply\":\"对玩家说的话\",\"actions\":[{\"type\":\"follow|stay|guard|gather|mine|come\"}]}。不需要动作时actions为空数组。绝不能要求或假装执行服务器命令、OP操作、创造物品或修改权限。");
+        MINING_ENABLED = b.comment("是否允许伙伴挖掘矿石；同时受世界 mobGriefing 规则控制")
+            .define("miningEnabled", true);
+        MINING_RADIUS = b.comment("伙伴搜索矿石的半径")
+            .defineInRange("miningRadius", 8, 3, 16);
+        MINING_BREAK_TICKS = b.comment("挖掘每个矿石所需 tick，20 tick 约等于1秒")
+            .defineInRange("miningBreakTicks", 30, 10, 200);
         b.pop();
         SPEC = b.build();
     }
@@ -117,6 +127,59 @@ public final class McAiConfig {
         SPEC.save();
     }
 
+    public static synchronized void updateFromMenu(String provider, String baseUrl, String model,
+                                                   String apiKey, boolean clearApiKey,
+                                                   boolean proactiveEnabled) {
+        String normalizedProvider = provider.toLowerCase(Locale.ROOT);
+        if (!validProvider(normalizedProvider)) throw new IllegalArgumentException("不支持的提供商");
+        String normalizedUrl = normalizeBaseUrl(baseUrl);
+        String normalizedModel = model == null ? "" : model.trim();
+        if (normalizedModel.isEmpty() || normalizedModel.length() > 128)
+            throw new IllegalArgumentException("模型名不能为空且最多128个字符");
+        if (apiKey != null && apiKey.length() > 1024)
+            throw new IllegalArgumentException("API密钥过长");
+
+        PROVIDER.set(normalizedProvider);
+        switch (normalizedProvider) {
+            case "deepseek" -> {
+                DEEPSEEK_BASE_URL.set(normalizedUrl);
+                DEEPSEEK_MODEL.set(normalizedModel);
+                if (clearApiKey) DEEPSEEK_API_KEY.set("");
+                else if (apiKey != null && !apiKey.isBlank()) DEEPSEEK_API_KEY.set(apiKey.trim());
+            }
+            case "custom" -> {
+                CUSTOM_BASE_URL.set(normalizedUrl);
+                CUSTOM_MODEL.set(normalizedModel);
+                if (clearApiKey) CUSTOM_API_KEY.set("");
+                else if (apiKey != null && !apiKey.isBlank()) CUSTOM_API_KEY.set(apiKey.trim());
+            }
+            default -> {
+                OPENAI_BASE_URL.set(normalizedUrl);
+                OPENAI_MODEL.set(normalizedModel);
+                if (clearApiKey) OPENAI_API_KEY.set("");
+                else if (apiKey != null && !apiKey.isBlank()) OPENAI_API_KEY.set(apiKey.trim());
+            }
+        }
+        PROACTIVE_ENABLED.set(proactiveEnabled);
+        SPEC.save();
+    }
+
+    private static String normalizeBaseUrl(String value) {
+        String text = value == null ? "" : value.trim();
+        if (text.isEmpty() || text.length() > 512) throw new IllegalArgumentException("API地址无效");
+        try {
+            URI uri = URI.create(text);
+            String scheme = uri.getScheme();
+            if (scheme == null || (!scheme.equalsIgnoreCase("https") && !scheme.equalsIgnoreCase("http")))
+                throw new IllegalArgumentException("API地址必须以 http:// 或 https:// 开头");
+            if (uri.getHost() == null) throw new IllegalArgumentException("API地址缺少主机名");
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(e.getMessage() == null ? "API地址格式错误" : e.getMessage());
+        }
+        while (text.endsWith("/")) text = text.substring(0, text.length() - 1);
+        return text;
+    }
+
     public static Path skinDirectory() {
         return FMLPaths.CONFIGDIR.get().resolve("qxfmcai").resolve("skins");
     }
@@ -126,4 +189,3 @@ public final class McAiConfig {
         catch (IOException ignored) {}
     }
 }
-

@@ -24,6 +24,7 @@ public final class McAiCommands {
             .then(Commands.literal("stay").executes(ctx -> mode(ctx.getSource(), AiCompanionEntity.Mode.STAY)))
             .then(Commands.literal("guard").executes(ctx -> mode(ctx.getSource(), AiCompanionEntity.Mode.GUARD)))
             .then(Commands.literal("gather").executes(ctx -> mode(ctx.getSource(), AiCompanionEntity.Mode.GATHER)))
+            .then(Commands.literal("mine").executes(ctx -> mode(ctx.getSource(), AiCompanionEntity.Mode.MINE)))
             .then(Commands.literal("come").executes(ctx -> come(ctx.getSource())))
             .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
             .then(Commands.literal("ask")
@@ -45,7 +46,7 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI：/mcai summon|follow|stay|guard|gather|come|ask|skin|status").withStyle(ChatFormatting.AQUA), false);
+        source.sendSuccess(() -> Component.literal("qxfMCAI：/mcai summon|follow|stay|guard|gather|mine|come|ask|skin|status").withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("聊天也可用：@小麦 你的要求。按 M 打开中文控制菜单。"), false);
         source.sendSuccess(() -> Component.literal("OP 4：/mcai invincible、provider、model").withStyle(ChatFormatting.GRAY), false);
         return 1;
@@ -131,4 +132,3 @@ public final class McAiCommands {
         return 1;
     }
 }
-

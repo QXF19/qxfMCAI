@@ -28,7 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class AiService {
-    private static final Set<String> ALLOWED_ACTIONS = Set.of("follow", "stay", "guard", "gather", "come");
+    private static final Set<String> ALLOWED_ACTIONS = Set.of("follow", "stay", "guard", "gather", "mine", "come");
     private static final Set<UUID> PENDING = new HashSet<>();
     private static final java.util.Map<UUID, Deque<Message>> HISTORY = new java.util.concurrent.ConcurrentHashMap<>();
     private static ExecutorService executor;
@@ -65,7 +65,7 @@ public final class AiService {
                 return;
             }
             if (!isConfigured()) {
-                if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 尚未配置API密钥。请设置环境变量或编辑 qxfmcai-server.toml。")
+                if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 尚未配置API。请按 K 打开菜单，在“API 设置”中填写并保存。")
                     .withStyle(ChatFormatting.YELLOW));
                 return;
             }

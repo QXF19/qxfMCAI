@@ -1,6 +1,8 @@
 package cn.qxf.mcai.entity;
 
 import cn.qxf.mcai.server.CompanionManager;
+import cn.qxf.mcai.config.McAiConfig;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -30,7 +32,14 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.Tags;
 
 import javax.annotation.Nullable;
 import java.util.Comparator;
@@ -42,6 +51,9 @@ public class AiCompanionEntity extends TamableAnimal {
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<String> DATA_SKIN =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
+    @Nullable private BlockPos miningTarget;
+    private int miningProgress;
+    private int miningStuckTicks;
 
     public AiCompanionEntity(EntityType<? extends TamableAnimal> type, Level level) {
         super(type, level);
@@ -83,8 +95,14 @@ public class AiCompanionEntity extends TamableAnimal {
     @Override
     public void tick() {
         super.tick();
-        if (level().isClientSide || tickCount % 10 != 0) return;
-        CompanionManager.register(this);
+        if (level().isClientSide) return;
+        if (tickCount % 20 == 0) CompanionManager.register(this);
+
+        if (getMode() == Mode.MINE) {
+            mineOreTick();
+            return;
+        }
+        if (tickCount % 10 != 0) return;
 
         Mode mode = getMode();
         if (mode == Mode.STAY) {
@@ -122,7 +140,8 @@ public class AiCompanionEntity extends TamableAnimal {
                 case FOLLOW -> Mode.STAY;
                 case STAY -> Mode.GUARD;
                 case GUARD -> Mode.GATHER;
-                case GATHER -> Mode.FOLLOW;
+                case GATHER -> Mode.MINE;
+                case MINE -> Mode.FOLLOW;
             };
             setMode(next);
             player.displayClientMessage(net.minecraft.network.chat.Component.literal("§d[小麦] 已切换为：" + next.chinese), true);
@@ -140,6 +159,7 @@ public class AiCompanionEntity extends TamableAnimal {
     }
 
     public void setMode(Mode mode) {
+        if (getMode() == Mode.MINE && mode != Mode.MINE) clearMiningTarget();
         entityData.set(DATA_MODE, mode.id);
         setOrderedToSit(mode != Mode.FOLLOW);
         if (mode == Mode.STAY) setTarget(null);
@@ -184,7 +204,7 @@ public class AiCompanionEntity extends TamableAnimal {
     }
 
     public enum Mode {
-        FOLLOW(0, "跟随"), STAY(1, "等待"), GUARD(2, "警戒"), GATHER(3, "拾取");
+        FOLLOW(0, "跟随"), STAY(1, "等待"), GUARD(2, "警戒"), GATHER(3, "拾取"), MINE(4, "挖矿");
         public final int id;
         public final String chinese;
         Mode(int id, String chinese) { this.id = id; this.chinese = chinese; }
@@ -192,5 +212,84 @@ public class AiCompanionEntity extends TamableAnimal {
             for (Mode value : values()) if (value.id == id) return value;
             return FOLLOW;
         }
+    }
+
+    private void mineOreTick() {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        if (!McAiConfig.MINING_ENABLED.get()
+            || !serverLevel.getGameRules().getBoolean(GameRules.RULE_MOBGRIEFING)) {
+            clearMiningTarget();
+            return;
+        }
+
+        if (miningTarget == null || !isValidOre(serverLevel, miningTarget)
+            || miningTarget.distSqr(blockPosition()) > McAiConfig.MINING_RADIUS.get() * McAiConfig.MINING_RADIUS.get() * 4.0D) {
+            clearMiningTarget();
+            if (tickCount % 20 == 0) miningTarget = findNearestOre(serverLevel);
+        }
+        if (miningTarget == null) return;
+
+        Vec3 center = Vec3.atCenterOf(miningTarget);
+        double distance = position().distanceToSqr(center);
+        if (distance > 8.0D) {
+            boolean moving = getNavigation().moveTo(center.x, center.y, center.z, 1.1D);
+            miningProgress = 0;
+            miningStuckTicks = moving ? 0 : miningStuckTicks + 1;
+            if (miningStuckTicks > 100) clearMiningTarget();
+            return;
+        }
+
+        getNavigation().stop();
+        getLookControl().setLookAt(center.x, center.y, center.z);
+        miningStuckTicks = 0;
+        miningProgress++;
+        int breakTicks = McAiConfig.MINING_BREAK_TICKS.get();
+        int crack = Math.min(9, miningProgress * 10 / breakTicks);
+        serverLevel.destroyBlockProgress(getId(), miningTarget, crack);
+        if (miningProgress < breakTicks) return;
+
+        BlockState state = serverLevel.getBlockState(miningTarget);
+        if (isValidOre(serverLevel, miningTarget)) {
+            Block.dropResources(state, serverLevel, miningTarget, serverLevel.getBlockEntity(miningTarget),
+                this, new ItemStack(Items.DIAMOND_PICKAXE));
+            serverLevel.setBlock(miningTarget, Blocks.AIR.defaultBlockState(), 3);
+            serverLevel.levelEvent(2001, miningTarget, Block.getId(state));
+        }
+        clearMiningTarget();
+    }
+
+    @Nullable
+    private BlockPos findNearestOre(ServerLevel level) {
+        int radius = McAiConfig.MINING_RADIUS.get();
+        BlockPos origin = blockPosition();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -Math.min(6, radius); dy <= Math.min(6, radius); dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    BlockPos candidate = origin.offset(dx, dy, dz);
+                    if (!isValidOre(level, candidate)) continue;
+                    double distance = candidate.distSqr(origin);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        best = candidate.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private boolean isValidOre(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return state.is(Tags.Blocks.ORES) && state.getDestroySpeed(level, pos) >= 0.0F;
+    }
+
+    private void clearMiningTarget() {
+        if (miningTarget != null && level() instanceof ServerLevel serverLevel)
+            serverLevel.destroyBlockProgress(getId(), miningTarget, -1);
+        miningTarget = null;
+        miningProgress = 0;
+        miningStuckTicks = 0;
     }
 }

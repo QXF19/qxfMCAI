@@ -3,6 +3,7 @@ package cn.qxf.mcai;
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.ModEntities;
+import cn.qxf.mcai.network.ModNetwork;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -25,7 +26,9 @@ public final class QxfMcAi {
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
-        event.enqueueWork(AiService::init);
+        event.enqueueWork(() -> {
+            ModNetwork.register();
+            AiService.init();
+        });
     }
 }
-

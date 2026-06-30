@@ -85,6 +85,7 @@ public final class CompanionManager {
                 case "stay" -> setMode(player, AiCompanionEntity.Mode.STAY);
                 case "guard" -> setMode(player, AiCompanionEntity.Mode.GUARD);
                 case "gather" -> setMode(player, AiCompanionEntity.Mode.GATHER);
+                case "mine" -> setMode(player, AiCompanionEntity.Mode.MINE);
                 case "come" -> {
                     AiCompanionEntity companion = find(player);
                     if (companion != null) come(player, companion);
