@@ -10,8 +10,9 @@ displayName="${mod_name}"
 authors="${mod_authors}"
 displayURL="https://github.com/QXF19/qxfMCAI"
 description='''
-全中文 Minecraft Forge AI 生存伙伴。支持 OpenAI、DeepSeek 与自定义兼容模型，
-提供独立控制菜单、聊天、跟随、警戒、拾取、皮肤切换和受 OP 4 保护的无敌模式。
+全中文 Minecraft Forge 智能伙伴“龙龙”。支持 OpenAI、DeepSeek 与自定义兼容模型，
+拥有持久记忆、独立背包、20+实际动作、武器与工具、洞穴式挖矿、建造、聊天气泡、
+日系 furry 外观、YSM 可选兼容数据，以及受 OP 4 保护的无敌与全命令授权。
 '''
 
 [[dependencies.${mod_id}]]
@@ -28,3 +29,9 @@ versionRange="[1.20.1,1.20.2)"
 ordering="NONE"
 side="BOTH"
 
+[[dependencies.${mod_id}]]
+modId="yes_steve_model"
+mandatory=false
+versionRange="[2.4.1,)"
+ordering="AFTER"
+side="BOTH"

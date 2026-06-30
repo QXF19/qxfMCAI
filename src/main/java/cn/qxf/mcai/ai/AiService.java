@@ -1,6 +1,7 @@
 package cn.qxf.mcai.ai;
 
 import cn.qxf.mcai.config.McAiConfig;
+import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.server.CompanionManager;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -28,7 +29,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class AiService {
-    private static final Set<String> ALLOWED_ACTIONS = Set.of("follow", "stay", "guard", "gather", "mine", "come");
+    private static final Set<String> ALLOWED_ACTIONS = Set.of(
+        "follow", "stay", "guard", "gather", "mine", "come", "explore", "patrol", "hunt", "chop",
+        "harvest", "plant", "farm", "fish", "build_shelter", "build_house", "build_bridge", "place_torch",
+        "eat", "sleep", "deposit", "equip_weapon", "equip_pickaxe", "craft", "command", "emote", "stop");
     private static final Set<UUID> PENDING = new HashSet<>();
     private static final java.util.Map<UUID, Deque<Message>> HISTORY = new java.util.concurrent.ConcurrentHashMap<>();
     private static ExecutorService executor;
@@ -43,11 +47,8 @@ public final class AiService {
             thread.setDaemon(true);
             return thread;
         });
-        client = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(15))
-            .executor(executor)
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
+        client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).executor(executor)
+            .followRedirects(HttpClient.Redirect.NORMAL).build();
     }
 
     public static boolean isConfigured() {
@@ -60,12 +61,12 @@ public final class AiService {
         UUID playerId = player.getUUID();
         synchronized (PENDING) {
             if (PENDING.contains(playerId)) {
-                if (!proactive) player.sendSystemMessage(Component.literal("[小麦] 我还在想上一件事，稍等一下呀。")
+                if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 我正在认真做上一件事，稍等一下呀。")
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
                 return;
             }
             if (!isConfigured()) {
-                if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 尚未配置API。请按 K 打开菜单，在“API 设置”中填写并保存。")
+                if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 尚未配置API。请按 M 打开菜单，在“API 设置”中填写并保存。")
                     .withStyle(ChatFormatting.YELLOW));
                 return;
             }
@@ -73,7 +74,8 @@ public final class AiService {
         }
 
         String contextPrompt = prompt + "\n\n当前游戏状态：" + gameContext(player);
-        if (!proactive) player.sendSystemMessage(Component.literal("[小麦] 让我想想……").withStyle(ChatFormatting.DARK_GRAY));
+        if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 让我观察一下，再决定怎么真正做……")
+            .withStyle(ChatFormatting.DARK_GRAY));
 
         CompletableFuture.supplyAsync(() -> request(playerId, contextPrompt), executor)
             .whenComplete((reply, error) -> {
@@ -86,7 +88,13 @@ public final class AiService {
                         return;
                     }
                     if (!player.isAlive()) return;
-                    player.sendSystemMessage(Component.literal("<小麦> " + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
+                    player.sendSystemMessage(Component.literal("<龙龙> " + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
+                    AiCompanionEntity companion = CompanionManager.find(player);
+                    if (companion == null) companion = CompanionManager.summon(player);
+                    companion.speak(reply.text(), reply.emotion());
+                    companion.setThought(reply.thought());
+                    companion.remember("玩家说：" + prompt);
+                    companion.remember("龙龙回应：" + reply.text());
                     CompanionManager.applyActions(player, reply.actions());
                 });
             });
@@ -97,9 +105,11 @@ public final class AiService {
             JsonObject body = new JsonObject();
             body.addProperty("model", McAiConfig.model());
             body.addProperty("stream", false);
+            JsonObject responseFormat = new JsonObject();
+            responseFormat.addProperty("type", "json_object");
+            body.add("response_format", responseFormat);
             JsonArray messages = new JsonArray();
             messages.add(messageJson("system", McAiConfig.SYSTEM_PROMPT.get()));
-
             Deque<Message> history = HISTORY.computeIfAbsent(playerId, ignored -> new ArrayDeque<>());
             synchronized (history) {
                 for (Message old : history) messages.add(messageJson(old.role(), old.content()));
@@ -109,15 +119,12 @@ public final class AiService {
 
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint()))
                 .timeout(Duration.ofSeconds(McAiConfig.REQUEST_TIMEOUT_SECONDS.get()))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
+                .header("Content-Type", "application/json").header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8));
             if (!McAiConfig.apiKey().isBlank()) builder.header("Authorization", "Bearer " + McAiConfig.apiKey());
-
             HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            if (response.statusCode() < 200 || response.statusCode() >= 300)
                 throw new IllegalStateException("HTTP " + response.statusCode() + "：" + readApiError(response.body()));
-            }
             JsonObject root = JsonParser.parseString(response.body().trim()).getAsJsonObject();
             String content = root.getAsJsonArray("choices").get(0).getAsJsonObject()
                 .getAsJsonObject("message").get("content").getAsString();
@@ -141,28 +148,22 @@ public final class AiService {
 
     private static ParsedReply parseReply(String raw) {
         String clean = raw.trim();
-        if (clean.startsWith("```")) {
-            clean = clean.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
-        }
+        if (clean.startsWith("```")) clean = clean.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
         try {
             JsonObject object = JsonParser.parseString(clean).getAsJsonObject();
             String text = object.has("reply") ? object.get("reply").getAsString() : "我知道啦。";
-            List<String> actions = new ArrayList<>();
+            String thought = object.has("thought") ? object.get("thought").getAsString() : "在认真理解玩家的需要";
+            String emotion = object.has("emotion") ? object.get("emotion").getAsString() : "curious";
+            List<AgentAction> actions = new ArrayList<>();
             if (object.has("actions") && object.get("actions").isJsonArray()) {
                 for (JsonElement element : object.getAsJsonArray("actions")) {
-                    String type = null;
-                    if (element.isJsonPrimitive()) type = element.getAsString();
-                    else if (element.isJsonObject() && element.getAsJsonObject().has("type"))
-                        type = element.getAsJsonObject().get("type").getAsString();
-                    if (type != null) {
-                        type = type.toLowerCase(java.util.Locale.ROOT);
-                        if (ALLOWED_ACTIONS.contains(type)) actions.add(type);
-                    }
+                    AgentAction action = AgentAction.fromJson(element);
+                    if (ALLOWED_ACTIONS.contains(action.type())) actions.add(action);
                 }
             }
-            return new ParsedReply(text.isBlank() ? "我在呢。" : text, List.copyOf(actions));
+            return new ParsedReply(text.isBlank() ? "我在呢。" : text, thought, emotion, List.copyOf(actions));
         } catch (Exception ignored) {
-            return new ParsedReply(clean.isBlank() ? "我在呢。" : clean, List.of());
+            return new ParsedReply(clean.isBlank() ? "我在呢。" : clean, "正在理解这句话", "curious", List.of());
         }
     }
 
@@ -183,11 +184,12 @@ public final class AiService {
     }
 
     private static String gameContext(ServerPlayer player) {
-        return "玩家=" + player.getGameProfile().getName()
-            + "，维度=" + player.level().dimension().location()
+        AiCompanionEntity companion = CompanionManager.find(player);
+        return "玩家=" + player.getGameProfile().getName() + "，维度=" + player.level().dimension().location()
             + "，生命=" + Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth())
-            + "，饱食度=" + player.getFoodData().getFoodLevel()
-            + "，坐标=" + player.blockPosition().getX() + "," + player.blockPosition().getY() + "," + player.blockPosition().getZ();
+            + "，饱食度=" + player.getFoodData().getFoodLevel() + "，坐标=" + player.blockPosition().getX()
+            + "," + player.blockPosition().getY() + "," + player.blockPosition().getZ()
+            + (companion == null ? "，龙龙尚未召唤" : "。" + companion.describeForAi());
     }
 
     private static String readApiError(String body) {
@@ -195,7 +197,8 @@ public final class AiService {
             JsonObject root = JsonParser.parseString(body.trim()).getAsJsonObject();
             if (root.has("error")) {
                 JsonElement error = root.get("error");
-                if (error.isJsonObject() && error.getAsJsonObject().has("message")) return error.getAsJsonObject().get("message").getAsString();
+                if (error.isJsonObject() && error.getAsJsonObject().has("message"))
+                    return error.getAsJsonObject().get("message").getAsString();
                 return error.toString();
             }
         } catch (Exception ignored) {}
@@ -210,5 +213,5 @@ public final class AiService {
     }
 
     private record Message(String role, String content) {}
-    private record ParsedReply(String text, List<String> actions) {}
+    private record ParsedReply(String text, String thought, String emotion, List<AgentAction> actions) {}
 }

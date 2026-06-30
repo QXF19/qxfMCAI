@@ -1,98 +1,111 @@
-# qxfMCAI
+# qxfMCAI v3
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.4.10%2B-DFA86A)](https://files.minecraftforge.net/net/minecraftforge/forge/index_1.20.1.html)
+[![Version](https://img.shields.io/badge/version-3.0.0-ff77aa)](https://github.com/QXF19/qxfMCAI/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-一个面向 **Minecraft Java 1.20.1 / Forge** 的全中文 AI 生存伙伴模组。
+面向 **Minecraft Java 1.20.1 / Forge** 的全中文智能生存伙伴模组。伙伴现名为 **龙龙（ロンロン）**：他会记住经历、形成想法、安排任务，并在世界里真正移动、采集、使用工具、战斗和建造。
 
-> 当前版本：2.0.0。AI 只执行白名单动作；无敌模式和 API 管理严格要求 OP 权限等级 4。
+> 模组模拟“独立人格与长期记忆”，并不宣称模型拥有真实意识。全命令能力必须由 OP4 在菜单中明确授权。
 
-## V2.0 功能
+## v3 核心功能
 
-- 按 **M** 打开自适应分页菜单，不再遮挡热栏
-- 直接在菜单输入提供商、API 基础地址、模型和 API 密钥
-- 支持 OpenAI、DeepSeek 和自定义 OpenAI 兼容接口
-- API 密钥默认掩码；留空保留服务端原值；密钥绝不回传客户端
-- AI 伙伴“小麦”：跟随、等待、警戒、拾取、挖矿、跨维度找回
-- 挖矿只识别 Forge 矿石标签，兼容大多数模组矿石
-- 通过“@小麦”“小麦，”或 `/mcai ask` 聊天
-- 保存多轮对话上下文，并可定期主动关心玩家
-- 支持 `config/qxfmcai/skins/` 目录中的玩家皮肤 PNG
-- 服务端异步调用模型，不阻塞游戏主线程
+- 四页中文控制菜单：伙伴、任务、外观、API/权限
+- OpenAI、DeepSeek、自定义 OpenAI 兼容接口；默认 DeepSeek 模型 `deepseek-v4-pro`
+- 结构化 JSON 计划，经服务端校验后进入实际任务队列
+- 27 格独立背包，物品、装备、等级、记忆、想法和 YSM 选择随世界保存
+- 龙龙拥有自己的等级、经验、已完成任务数、长期目标和近期记忆
+- 会装备剑、斧、弓和镐；弓消耗箭，武器与工具正常损耗耐久
+- 向下搜索矿脉，无法直接寻路时会开凿双格高通道逐步深入地下
+- 使用真实工具与方块掉落规则；没有镐子或材料时会停止并说明原因
+- 使用背包里的真实方块建造庇护所、小屋、桥梁和照明
+- 头顶聊天气泡、当前动作标签、日系颜文字表情、龙耳和动态尾巴
+- PNG 皮肤热切换，以及 YSM 2.4.1+ 模型/材质选择数据与模型包目录
+- OP4 可开启无敌模式和“AI 全命令”危险权限
+
+## 27 种动作
+
+`follow`、`stay`、`guard`、`gather`、`mine`、`come`、`explore`、`patrol`、`hunt`、`chop`、`harvest`、`plant`、`farm`、`fish`、`build_shelter`、`build_house`、`build_bridge`、`place_torch`、`eat`、`sleep`、`deposit`、`equip_weapon`、`equip_pickaxe`、`craft`、`command`、`emote`、`stop`。
+
+动作可以由 AI 按玩家自然语言要求组合，也能从菜单或 `/mcai task <动作> <数量>` 手动测试。
 
 ## 安装
 
 1. 安装 Minecraft 1.20.1 与 Forge 47.4.10 或更高版本。
-2. 从 [Releases](https://github.com/QXF19/qxfMCAI/releases) 下载 `qxfmcai-2.0.0.jar`。
-3. 把 jar 同时放入服务端和客户端的 `mods` 文件夹。
-4. 进入世界，确保自己拥有 OP 4，按 **M** 打开菜单。
+2. 从 [Releases](https://github.com/QXF19/qxfMCAI/releases) 下载 `qxfmcai-3.0.0.jar`。
+3. 把 jar 同时放入客户端和服务端的 `mods` 文件夹。
+4. 进入世界后按 **M** 打开菜单，使用 `/mcai summon` 召唤龙龙。
 
-## 在菜单配置 API
+## 对话和真正执行任务
 
-切换到“API 设置（OP4）”页：
+在聊天中输入：
 
-1. 选择 `openai`、`deepseek` 或 `custom`。
-2. 填写 API 基础地址和模型名。
-3. 输入 API 密钥，点击“保存全部 API 设置”。
-4. 密钥输入框留空时保留服务端已保存的密钥。
-5. 如需删除配置文件中的旧密钥，开启“清除旧密钥”。
+```text
+@龙龙 带上镐子向下找铁矿，回来后把矿物放进附近箱子
+@龙龙 用背包里的木板在这里建一间房子
+@龙龙 装备武器，帮我清理基地周围的怪物
+```
 
-默认值：
+龙龙会回复、显示表情和当前动作，并把计划拆成任务。完成一个任务后才会记录经验；背包没有工具、箭矢或建材时不会假装成功。
 
-- OpenAI：`https://api.openai.com/v1` / `gpt-5.2-chat-latest`
-- DeepSeek：`https://api.deepseek.com` / `deepseek-v4-pro`
-- 自定义：默认示例为本地 Ollama 兼容地址
+## 背包、武器和工具
 
-也支持环境变量：`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`QXF_MCAI_API_KEY`。
+- Shift + 右键龙龙，或点击菜单“打开27格背包”。
+- 把镐子、斧、剑、弓、箭、食物、火把和建筑方块放入他的背包。
+- 龙龙会按工具等级与剩余耐久选择装备。
+- 支持的建材包括木板、原木、圆石、石头、泥土和砖块。
+- “整理到附近箱子”会把背包物资放入五格内的容器。
 
-> API 密钥会通过 Minecraft 连接发送给服务端并写入服务端配置。请只在可信服务器上输入；环境变量仍是公开服务器的推荐方式。
+## 挖矿与建造
 
-## 命令
+- 挖矿会优先搜索当前位置以下、配置深度范围内的 Forge `ores` 标签方块。
+- 无路可走时，龙龙会朝目标开凿两格高的下降通道。
+- 必须持有能正确挖掘目标方块的镐子，并遵守 `mobGriefing`。
+- 庇护所、小屋和桥梁按蓝图逐块放置，消耗背包里的真实材料。
+- 管理员可在 `qxfmcai-server.toml` 关闭挖矿、建造或自主行为。
 
-- `/mcai summon`：召唤或找回伙伴
-- `/mcai follow`：跟随
-- `/mcai stay`：等待
-- `/mcai guard`：警戒并保护玩家
-- `/mcai gather`：拾取附近掉落物
-- `/mcai mine`：搜索并挖掘附近矿石
-- `/mcai come`：来到身边
-- `/mcai ask <内容>`：直接聊天
-- `/mcai skin <文件名.png>`：切换皮肤
-- `/mcai status`：查看状态
-- `/mcai invincible <true|false>`：无敌模式，仅 OP 4
-- `/mcai provider <openai|deepseek|custom>`：切换提供商，仅 OP 4
-- `/mcai model <模型名>`：切换模型，仅 OP 4
+## YSM 与外观
 
-右键伙伴会依次切换“跟随 → 等待 → 警戒 → 拾取 → 挖矿”。
+v3 会检测可选模组 **Yes Steve Model 2.4.1+**，保存龙龙的 `model_id` 与 `texture_id`，并创建：
 
-## 挖矿规则
+```text
+config/qxfmcai/ysm_models/
+```
 
-- 只挖 Forge `ores` 标签中的矿石，不会无差别拆家。
-- 必须开启世界规则 `mobGriefing`。
-- 搜索半径和挖掘速度可在 `qxfmcai-server.toml` 调整。
-- 使用标准方块掉落逻辑，模组矿石只要正确加入 Forge 标签即可兼容。
-- 服务器管理员可随时把 `miningEnabled` 设为 `false`。
+YSM 模型包本身请按 YSM 官方格式放入 `config/yes_steve_model` 并在客户端、服务端同时安装 YSM。YSM 官方公开命令主要面向玩家模型；龙龙作为独立驯服实体时始终保留内置 PNG 玩家模型、龙耳和尾巴安全回退，避免未安装 YSM 或接口变化导致崩溃。
 
-## 皮肤
-
-把标准 Minecraft 玩家皮肤 PNG 放入：
+普通 PNG 皮肤放在：
 
 ```text
 config/qxfmcai/skins/
 ```
 
-默认读取 `companion.png`。文件名只允许字母、数字、点、下划线和短横线。
+## API 与权限
 
-## 安全与隐私
+按 M 切换到“API/权限”页，填写提供商、基础地址、模型与密钥。密钥留空会保留服务端旧值。
 
-- 模型只能返回 `follow/stay/guard/gather/mine/come` 白名单动作。
-- 模型不能执行服务器命令、授予 OP、生成物品或修改权限。
-- API 配置保存需要 OP 4；密钥不会从服务端同步回客户端。
-- 对话、生命值、饱食度、维度和游戏内坐标会发送给所选模型服务。
-- 请不要提交包含密钥的 `qxfmcai-server.toml`。
+- OpenAI：`https://api.openai.com/v1` / `gpt-5.2-chat-latest`
+- DeepSeek：`https://api.deepseek.com` / `deepseek-v4-pro`
+- 自定义：`http://127.0.0.1:11434/v1` / `qwen2.5:7b`
 
-## 开发构建
+“全命令”默认关闭。只有 OP4 能保存并开启；开启后，模型产生的 `command` 动作会以该 OP4 玩家身份执行任意 Minecraft/模组命令。请只在私人、已备份的世界使用。
+
+## 常用命令
+
+- `/mcai summon`、`come`、`follow`、`stay`、`guard`
+- `/mcai inventory`：打开龙龙背包
+- `/mcai mine`、`chop`、`farm`、`hunt`、`explore`、`patrol`
+- `/mcai build shelter|house|bridge`
+- `/mcai equip weapon|pickaxe`
+- `/mcai task <动作> <数量>`
+- `/mcai ask <内容>`
+- `/mcai skin <文件.png>`
+- `/mcai ysm <模型ID> <材质ID>`
+- `/mcai status`
+- `/mcai invincible <true|false>`：仅 OP4
+
+## 构建与发行
 
 需要 JDK 17：
 
@@ -100,7 +113,7 @@ config/qxfmcai/skins/
 ./gradlew build
 ```
 
-产物位于 `build/libs/`。GitHub 标签 `v*` 会自动创建带 jar 的发行版。
+产物位于 `build/libs/`。推送 `v*` 标签时，GitHub Actions 会自动构建并附加 jar 到发行版。
 
 ## 许可证
 

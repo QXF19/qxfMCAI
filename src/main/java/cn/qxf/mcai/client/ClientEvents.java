@@ -30,6 +30,11 @@ public final class ClientEvents {
         event.registerEntityRenderer(ModEntities.AI_COMPANION.get(), AiCompanionRenderer::new);
     }
 
+    @SubscribeEvent
+    public static void registerLayers(EntityRenderersEvent.RegisterLayerDefinitions event) {
+        event.registerLayerDefinition(DragonFurryLayer.LAYER, DragonFurryLayer::createBodyLayer);
+    }
+
     @Mod.EventBusSubscriber(modid = QxfMcAi.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
     public static final class ForgeBus {
         @SubscribeEvent
@@ -42,4 +47,3 @@ public final class ClientEvents {
         }
     }
 }
-

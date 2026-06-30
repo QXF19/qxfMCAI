@@ -38,11 +38,13 @@ public final class ForgeEvents {
 
     private static String extractPrompt(String raw) {
         String text = raw.trim();
-        String[] prefixes = {"@小麦 ", "@小麦，", "@小麦,", "小麦 ", "小麦，", "小麦,"};
+        String[] prefixes = {"@龙龙 ", "@龙龙，", "@龙龙,", "龙龙 ", "龙龙，", "龙龙,",
+            "@龍龍 ", "龍龍，", "龍龍,"};
         for (String prefix : prefixes) {
             if (text.startsWith(prefix)) return text.substring(prefix.length()).trim();
         }
-        if (text.equals("@小麦") || text.equals("小麦")) return "玩家在叫你，请主动回应并询问需要什么帮助。";
+        if (text.equals("@龙龙") || text.equals("龙龙") || text.equals("龍龍"))
+            return "玩家在叫你。请结合自己的当前想法主动回应，并询问或建议一件可以真正执行的事情。";
         return null;
     }
 
@@ -56,14 +58,14 @@ public final class ForgeEvents {
         long last = LAST_PROACTIVE.computeIfAbsent(player.getUUID(), ignored -> now);
         if (now - last < interval) return;
         LAST_PROACTIVE.put(player.getUUID(), now);
-        AiService.ask(player, "请根据当前状态主动和玩家说一两句贴心、有用的话；必要时可建议下一步生存目标。", true);
+        AiService.ask(player, "请根据你自己的记忆、目标和当前环境主动做决定：可以聊天，也可以安排一个确实能执行的小任务。", true);
     }
 
     @SubscribeEvent
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI] 按 M 打开AI伙伴菜单；输入“@小麦 你好”开始聊天。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v3] 按 M 打开龙龙菜单；输入“@龙龙 你好”交流，Shift+右键打开他的背包。")
                 .withStyle(ChatFormatting.AQUA));
         }
     }

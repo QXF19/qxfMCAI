@@ -26,8 +26,12 @@ public final class McAiConfig {
     public static final ForgeConfigSpec.IntValue REQUEST_TIMEOUT_SECONDS;
     public static final ForgeConfigSpec.IntValue HISTORY_TURNS;
     public static final ForgeConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
+    public static final ForgeConfigSpec.BooleanValue AUTONOMY_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue ALLOW_FULL_COMMANDS;
+    public static final ForgeConfigSpec.BooleanValue BUILDING_ENABLED;
     public static final ForgeConfigSpec.BooleanValue MINING_ENABLED;
     public static final ForgeConfigSpec.IntValue MINING_RADIUS;
+    public static final ForgeConfigSpec.IntValue MINING_DEPTH;
     public static final ForgeConfigSpec.IntValue MINING_BREAK_TICKS;
 
     static {
@@ -59,11 +63,19 @@ public final class McAiConfig {
         PROACTIVE_INTERVAL_SECONDS = b.defineInRange("proactiveIntervalSeconds", 300, 60, 3600);
         REQUEST_TIMEOUT_SECONDS = b.defineInRange("requestTimeoutSeconds", 45, 10, 180);
         HISTORY_TURNS = b.defineInRange("historyTurns", 8, 0, 30);
-        SYSTEM_PROMPT = b.define("systemPrompt", "你是Minecraft生存伙伴小麦。只用简洁自然的中文回复，主动、温暖但不啰嗦。根据玩家要求从允许动作中选择。必须输出JSON：{\"reply\":\"对玩家说的话\",\"actions\":[{\"type\":\"follow|stay|guard|gather|mine|come\"}]}。不需要动作时actions为空数组。绝不能要求或假装执行服务器命令、OP操作、创造物品或修改权限。");
+        SYSTEM_PROMPT = b.define("systemPrompt", "你是Minecraft伙伴龙龙（ロンロン），一只有日系furry气质、温暖主动但有自己想法的龙。你会记住经历、形成当前目标并真正执行任务，不得假装已经完成。只用自然中文回复。必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"你的当前想法\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标\",\"count\":1,\"message\":\"可选\",\"command\":\"仅command动作使用\"}]}。可用动作：follow,stay,guard,gather,mine,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。任务需要多步时按合理顺序输出多个动作。command只有服主在菜单开启OP4全命令授权后才会运行。");
+        AUTONOMY_ENABLED = b.comment("龙龙是否会在空闲时根据夜晚、生命、物资和长期目标自主行动")
+            .define("autonomyEnabled", true);
+        ALLOW_FULL_COMMANDS = b.comment("危险：是否允许模型以OP4玩家身份执行任意游戏命令；只能在菜单由OP4开启")
+            .define("allowFullCommands", false);
+        BUILDING_ENABLED = b.comment("是否允许龙龙放置方块建造基础设施")
+            .define("buildingEnabled", true);
         MINING_ENABLED = b.comment("是否允许伙伴挖掘矿石；同时受世界 mobGriefing 规则控制")
             .define("miningEnabled", true);
         MINING_RADIUS = b.comment("伙伴搜索矿石的半径")
-            .defineInRange("miningRadius", 8, 3, 16);
+            .defineInRange("miningRadius", 16, 6, 32);
+        MINING_DEPTH = b.comment("向下寻找矿洞和矿石的最大深度")
+            .defineInRange("miningDepth", 24, 8, 64);
         MINING_BREAK_TICKS = b.comment("挖掘每个矿石所需 tick，20 tick 约等于1秒")
             .defineInRange("miningBreakTicks", 30, 10, 200);
         b.pop();
@@ -129,7 +141,8 @@ public final class McAiConfig {
 
     public static synchronized void updateFromMenu(String provider, String baseUrl, String model,
                                                    String apiKey, boolean clearApiKey,
-                                                   boolean proactiveEnabled) {
+                                                   boolean proactiveEnabled, boolean autonomyEnabled,
+                                                   boolean allowFullCommands) {
         String normalizedProvider = provider.toLowerCase(Locale.ROOT);
         if (!validProvider(normalizedProvider)) throw new IllegalArgumentException("不支持的提供商");
         String normalizedUrl = normalizeBaseUrl(baseUrl);
@@ -161,6 +174,8 @@ public final class McAiConfig {
             }
         }
         PROACTIVE_ENABLED.set(proactiveEnabled);
+        AUTONOMY_ENABLED.set(autonomyEnabled);
+        ALLOW_FULL_COMMANDS.set(allowFullCommands);
         SPEC.save();
     }
 
@@ -184,8 +199,19 @@ public final class McAiConfig {
         return FMLPaths.CONFIGDIR.get().resolve("qxfmcai").resolve("skins");
     }
 
+    public static Path ysmModelDirectory() {
+        return FMLPaths.CONFIGDIR.get().resolve("qxfmcai").resolve("ysm_models");
+    }
+
     public static void ensureSkinDirectory() {
-        try { Files.createDirectories(skinDirectory()); }
+        try {
+            Files.createDirectories(skinDirectory());
+            Files.createDirectories(ysmModelDirectory());
+            Path guide = ysmModelDirectory().resolve("README.txt");
+            if (Files.notExists(guide)) Files.writeString(guide,
+                "把合法取得的 YSM 2.5+ 模型包放在这里备份。YSM 本体仍需客户端和服务端同时安装，模型包按 YSM 官方方式导入。\n" +
+                "qxfMCAI 会保存龙龙选择的 model_id / texture_id，并在未安装 YSM 时安全回退到 PNG 皮肤。\n");
+        }
         catch (IOException ignored) {}
     }
 }

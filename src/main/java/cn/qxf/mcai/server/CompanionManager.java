@@ -1,5 +1,7 @@
 package cn.qxf.mcai.server;
 
+import cn.qxf.mcai.ai.AgentAction;
+import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.entity.ModEntities;
 import net.minecraft.network.chat.Component;
@@ -46,7 +48,7 @@ public final class CompanionManager {
         AiCompanionEntity companion = ModEntities.AI_COMPANION.get().create(player.serverLevel());
         if (companion == null) throw new IllegalStateException("无法创建AI伙伴实体");
         companion.tame(player);
-        companion.setCustomName(Component.literal("AI伙伴·小麦"));
+        companion.setCustomName(Component.literal("龙龙·ロンロン"));
         companion.setCustomNameVisible(true);
         companion.setMode(AiCompanionEntity.Mode.FOLLOW);
         companion.moveTo(player.getX() + 1.0D, player.getY(), player.getZ() + 1.0D, player.getYRot(), 0.0F);
@@ -57,15 +59,16 @@ public final class CompanionManager {
 
     public static void come(ServerPlayer player, AiCompanionEntity companion) {
         if (companion.level() != player.serverLevel()) {
-            String skin = companion.getSkinName();
-            boolean invincible = companion.isCompanionInvincible();
-            AiCompanionEntity.Mode mode = companion.getMode();
+            net.minecraft.nbt.CompoundTag saved = new net.minecraft.nbt.CompoundTag();
+            companion.saveWithoutId(saved);
             companion.discard();
             BY_OWNER.remove(player.getUUID());
-            AiCompanionEntity replacement = summon(player);
-            replacement.setSkinName(skin);
-            replacement.setCompanionInvincible(invincible);
-            replacement.setMode(mode);
+            AiCompanionEntity replacement = ModEntities.AI_COMPANION.get().create(player.serverLevel());
+            if (replacement == null) throw new IllegalStateException("无法跨维度创建龙龙");
+            replacement.load(saved);
+            replacement.moveTo(player.getX() + 1.0D, player.getY(), player.getZ() + 1.0D, player.getYRot(), 0.0F);
+            player.serverLevel().addFreshEntity(replacement);
+            register(replacement);
         } else {
             companion.teleportTo(player.getX() + 1.0D, player.getY(), player.getZ() + 1.0D);
         }
@@ -77,21 +80,23 @@ public final class CompanionManager {
         companion.setMode(mode);
     }
 
-    public static void applyActions(ServerPlayer player, List<String> actions) {
-        for (String raw : actions) {
-            String action = raw.toLowerCase(Locale.ROOT);
-            switch (action) {
-                case "follow" -> setMode(player, AiCompanionEntity.Mode.FOLLOW);
-                case "stay" -> setMode(player, AiCompanionEntity.Mode.STAY);
-                case "guard" -> setMode(player, AiCompanionEntity.Mode.GUARD);
-                case "gather" -> setMode(player, AiCompanionEntity.Mode.GATHER);
-                case "mine" -> setMode(player, AiCompanionEntity.Mode.MINE);
-                case "come" -> {
-                    AiCompanionEntity companion = find(player);
-                    if (companion != null) come(player, companion);
-                }
-                default -> { /* 严格忽略模型产生的未知或危险动作 */ }
-            }
+    public static void applyActions(ServerPlayer player, List<AgentAction> actions) {
+        AiCompanionEntity companion = find(player);
+        if (companion == null) companion = summon(player);
+        for (AgentAction action : actions) companion.enqueueAction(action);
+    }
+
+    public static boolean executeAuthorizedCommand(ServerPlayer player, String rawCommand) {
+        if (!McAiConfig.ALLOW_FULL_COMMANDS.get() || !player.hasPermissions(4)) {
+            player.sendSystemMessage(Component.literal("[龙龙] 全命令权限未在菜单中由 OP4 开启。"));
+            return false;
         }
+        String command = rawCommand == null ? "" : rawCommand.trim();
+        while (command.startsWith("/")) command = command.substring(1);
+        if (command.isBlank() || command.length() > 512) return false;
+        int result = player.server.getCommands().performPrefixedCommand(
+            player.createCommandSourceStack().withPermission(4).withSuppressedOutput(), command);
+        player.sendSystemMessage(Component.literal("[龙龙] 已执行授权命令：/" + command));
+        return result > 0;
     }
 }
