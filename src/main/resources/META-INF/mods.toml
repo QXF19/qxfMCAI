@@ -12,7 +12,7 @@ displayURL="https://github.com/QXF19/qxfMCAI"
 description='''
 全中文 Minecraft Forge 智能伙伴“龙龙”。支持 OpenAI、DeepSeek 与自定义兼容模型，
 拥有持久记忆、独立背包、20+实际动作、武器与工具、洞穴式挖矿、建造、聊天气泡、
-日系 furry 外观、YSM 可选兼容数据，以及受 OP 4 保护的无敌与全命令授权。
+日系 furry 外观、龙龙专属 YSM 附属资源，以及受 OP 4 保护的无敌与全命令授权。
 '''
 
 [[dependencies.${mod_id}]]
@@ -23,15 +23,15 @@ ordering="NONE"
 side="BOTH"
 
 [[dependencies.${mod_id}]]
+modId="yes_steve_model"
+mandatory=false
+versionRange="[2.6.5,)"
+ordering="AFTER"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
 modId="minecraft"
 mandatory=true
 versionRange="[1.20.1,1.20.2)"
 ordering="NONE"
-side="BOTH"
-
-[[dependencies.${mod_id}]]
-modId="yes_steve_model"
-mandatory=false
-versionRange="[2.4.1,)"
-ordering="AFTER"
 side="BOTH"

@@ -1,18 +1,22 @@
 package cn.qxf.mcai.client;
 
 import cn.qxf.mcai.entity.AiCompanionEntity;
-import net.minecraft.client.model.PlayerModel;
-import net.minecraft.client.model.geom.ModelLayers;
-import net.minecraft.client.renderer.entity.EntityRendererProvider;
-import net.minecraft.client.renderer.entity.MobRenderer;
-import net.minecraft.client.renderer.MultiBufferSource;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.model.PlayerModel;
+import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.client.renderer.entity.MobRenderer;
 import net.minecraft.network.chat.Component;
-import com.mojang.blaze3d.vertex.PoseStack;
-import org.joml.Matrix4f;
 import net.minecraft.resources.ResourceLocation;
+import org.joml.Matrix4f;
 
+/**
+ * 龙龙始终使用独立的玩家型渲染器，不替换或修改真实玩家的皮肤。
+ * 自定义皮肤或附属模型不可用时，SkinLoader 会返回安全的可见贴图。
+ */
 public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, PlayerModel<AiCompanionEntity>> {
     public AiCompanionRenderer(EntityRendererProvider.Context context) {
         super(context, new PlayerModel<>(context.bakeLayer(ModelLayers.PLAYER), false), 0.5F);
@@ -30,11 +34,12 @@ public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, Pl
         super.renderNameTag(entity, name, pose, buffers, light);
         String bubble = entity.getBubble();
         if (bubble.isBlank()) return;
+
         String face = switch (entity.getEmotion()) {
             case "happy" -> "(≧▽≦)";
             case "focused" -> "( •̀ ω •́ )✧";
             case "worried" -> "(｡•́︿•̀｡)";
-            case "proud" -> "(๑•̀ㅂ•́)و✧";
+            case "proud" -> "(￣▽￣)ゞ✧";
             case "sleepy" -> "(－ω－) zzZ";
             default -> "ฅ(•ㅅ•❀)ฅ";
         };

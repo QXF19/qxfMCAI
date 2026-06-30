@@ -13,7 +13,9 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.fml.ModList;
+import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
 
 public final class McAiCommands {
     private McAiCommands() {}
@@ -28,6 +30,7 @@ public final class McAiCommands {
             .then(modeCommand("guard", AiCompanionEntity.Mode.GUARD))
             .then(actionCommand("gather"))
             .then(actionCommand("mine"))
+            .then(Commands.literal("cave").executes(ctx -> action(ctx.getSource(), "find_cave", 1)))
             .then(actionCommand("explore"))
             .then(actionCommand("patrol"))
             .then(actionCommand("hunt"))
@@ -42,6 +45,8 @@ public final class McAiCommands {
                 .then(Commands.literal("pickaxe").executes(ctx -> action(ctx.getSource(), "equip_pickaxe", 1))))
             .then(Commands.literal("come").executes(ctx -> come(ctx.getSource())))
             .then(Commands.literal("inventory").executes(ctx -> inventory(ctx.getSource())))
+            .then(Commands.literal("permit")
+                .then(Commands.literal("teleport").executes(ctx -> permitTeleport(ctx.getSource()))))
             .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
             .then(Commands.literal("ask")
                 .then(Commands.argument("内容", StringArgumentType.greedyString())
@@ -68,6 +73,10 @@ public final class McAiCommands {
             .then(Commands.literal("model").requires(source -> source.hasPermission(4))
                 .then(Commands.argument("模型名", StringArgumentType.greedyString())
                     .executes(ctx -> model(ctx.getSource(), StringArgumentType.getString(ctx, "模型名")))))
+            .then(Commands.literal("command")
+                .then(Commands.argument("最高权限命令", StringArgumentType.greedyString())
+                    .executes(ctx -> highestCommand(ctx.getSource(),
+                        StringArgumentType.getString(ctx, "最高权限命令")))))
         );
     }
 
@@ -81,11 +90,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v3：龙龙会真正执行任务，而不只是聊天。按 M 打开控制中心。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v4：龙龙会独立执行真实任务、汇报发现并提出建议。按 M 打开控制中心。")
             .withStyle(ChatFormatting.AQUA), false);
-        source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、chop、farm、hunt、explore、build house、ask"), false);
+        source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("OP4 可在 API 菜单开启自主行动和危险的全命令权限。")
+        source.sendSuccess(() -> Component.literal("v4 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -131,6 +140,18 @@ public final class McAiCommands {
         return 1;
     }
 
+    private static int permitTeleport(CommandSourceStack source)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        AiCompanionEntity companion = CompanionManager.find(player);
+        if (companion == null || !companion.teleportOwnerWithPermission(player)) {
+            source.sendFailure(Component.literal("龙龙当前没有等待批准的同维度传送请求。"));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("已批准传送，正在前往龙龙发现的位置。"), false);
+        return 1;
+    }
+
     private static int ask(CommandSourceStack source, String text) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiService.ask(source.getPlayerOrException(), text, false);
         return 1;
@@ -150,11 +171,21 @@ public final class McAiCommands {
     private static int ysm(CommandSourceStack source, String modelId, String textureId)
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
+        java.nio.file.Path file = McAiConfig.ysmModelDirectory().resolve(modelId + ".ysm");
+        if (Files.isRegularFile(file)) {
+            try (InputStream input = Files.newInputStream(file)) {
+                byte[] header = input.readNBytes(16);
+                String prefix = new String(header, 0, Math.min(header.length, 16), StandardCharsets.UTF_8);
+                if (prefix.contains("YSGP")) {
+                    companion.setYsmSelection(modelId, textureId);
+                    source.sendSuccess(() -> Component.literal(modelId + ".ysm 已设为龙龙专属附属资源，不会改变玩家皮肤。当前文件是 YSGP 加密包；若运行时不能绑定自定义实体，将自动显示内置白龙外观。"), false);
+                    return 1;
+                }
+            } catch (java.io.IOException ignored) { }
+        }
         companion.setYsmSelection(modelId, textureId);
-        boolean loaded = ModList.get().isLoaded("yes_steve_model") || ModList.get().isLoaded("yesstevemodel");
-        source.sendSuccess(() -> Component.literal("YSM选择已保存：" + modelId + " / " + textureId
-            + (loaded ? "。检测到 YSM，将使用可用兼容动画。" : "。当前未检测到 YSM，已安全回退到 furry PNG 渲染。")), false);
-        return 1;
+        source.sendFailure(Component.literal("未找到可直接读取的未加密模型源；龙龙继续使用内置 furry/PNG 外观。"));
+        return 0;
     }
 
     private static int invincible(CommandSourceStack source, boolean enabled)
@@ -183,12 +214,19 @@ public final class McAiCommands {
         return 1;
     }
 
+    private static int highestCommand(CommandSourceStack source, String command)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        return CompanionManager.executeAuthorizedCommand(player, command) ? 1 : 0;
+    }
+
     private static int status(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = CompanionManager.find(source.getPlayerOrException());
         if (companion == null) { source.sendSuccess(() -> Component.literal("龙龙尚未召唤。"), false); return 1; }
         source.sendSuccess(() -> Component.literal("龙龙 Lv." + companion.getDragonLevel() + "（经验 "
             + companion.getDragonExperience() + "），模式=" + companion.getMode().chinese + "，活动=" + companion.getActivity()
-            + "，想法=" + companion.getThought() + "，已完成任务=" + companion.getCompletedTasks()), false);
+            + "，习惯=" + companion.getHabit() + "，想法=" + companion.getThought()
+            + "，已完成任务=" + companion.getCompletedTasks()), false);
         source.sendSuccess(() -> Component.literal("YSM=" + (companion.getYsmModel().isBlank() ? "未选择" : companion.getYsmModel()
             + "/" + companion.getYsmTexture()) + "，API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
         return 1;

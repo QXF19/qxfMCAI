@@ -18,7 +18,7 @@ public final class AiControlScreen extends Screen {
     private String provider = "openai";
     private boolean proactive = true;
     private boolean autonomy = true;
-    private boolean allowCommands;
+    private boolean allowCommands = true;
     private boolean clearKey;
     private boolean showKey;
     private EditBox skinBox;
@@ -39,7 +39,7 @@ public final class AiControlScreen extends Screen {
     private int panelWidth;
     private int panelHeight;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v3.0")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v4.0")); }
 
     @Override
     protected void init() {
@@ -83,13 +83,14 @@ public final class AiControlScreen extends Screen {
 
     private void initTasksPage(int left, int top, int width, int half) {
         int y = top;
-        addPair(left, y, half, "向下寻找矿洞挖矿", "mcai mine", "伐木并收进背包", "mcai chop"); y += 25;
-        addPair(left, y, half, "照料/收获农田", "mcai farm", "收集附近掉落物", "mcai gather"); y += 25;
-        addPair(left, y, half, "使用武器狩猎", "mcai hunt", "自主探索地形", "mcai explore"); y += 25;
-        addPair(left, y, half, "巡视基地", "mcai patrol", "放置火把", "mcai task place_torch 1"); y += 25;
-        addPair(left, y, half, "搭建生存庇护所", "mcai build shelter", "建造完整小屋", "mcai build house"); y += 25;
-        addPair(left, y, half, "建造三格宽桥梁", "mcai build bridge", "整理到附近箱子", "mcai task deposit 1"); y += 25;
-        addPair(left, y, half, "制作基础材料", "mcai task craft 1", "吃东西恢复生命", "mcai task eat 1"); y += 29;
+        addPair(left, y, half, "独立向下挖矿", "mcai mine", "寻找天然矿洞", "mcai cave"); y += 22;
+        addPair(left, y, half, "伐木并收进背包", "mcai chop", "自主探索地形", "mcai explore"); y += 22;
+        addPair(left, y, half, "照料/收获农田", "mcai farm", "收集附近掉落物", "mcai gather"); y += 22;
+        addPair(left, y, half, "使用武器狩猎", "mcai hunt", "允许发现点传送", "mcai permit teleport"); y += 22;
+        addPair(left, y, half, "巡视基地", "mcai patrol", "放置火把", "mcai task place_torch 1"); y += 22;
+        addPair(left, y, half, "搭建生存庇护所", "mcai build shelter", "建造完整小屋", "mcai build house"); y += 22;
+        addPair(left, y, half, "建造三格宽桥梁", "mcai build bridge", "整理到附近箱子", "mcai task deposit 1"); y += 22;
+        addPair(left, y, half, "制作基础材料", "mcai task craft 1", "吃东西恢复生命", "mcai task eat 1"); y += 24;
         addRenderableWidget(Button.builder(Component.literal("更多：钓鱼、睡觉、表情、种植等可直接对龙龙说"), b -> {})
             .bounds(left, y, width, 20).build()).active = false;
     }
@@ -98,7 +99,7 @@ public final class AiControlScreen extends Screen {
         int y = top;
         skinBox = new EditBox(font, left, y, width - 78, 20, Component.literal("PNG皮肤文件名"));
         skinBox.setMaxLength(128);
-        skinBox.setValue("companion.png");
+        skinBox.setValue("white_dragon.png");
         addRenderableWidget(skinBox);
         addRenderableWidget(Button.builder(Component.literal("PNG换肤"), b -> {
             SkinLoader.clear();
@@ -108,7 +109,7 @@ public final class AiControlScreen extends Screen {
         y += 34;
         ysmModelBox = new EditBox(font, left, y, width, 20, Component.literal("YSM 模型ID"));
         ysmModelBox.setMaxLength(96);
-        ysmModelBox.setValue("longlong");
+        ysmModelBox.setValue("001");
         addRenderableWidget(ysmModelBox);
         y += 34;
         ysmTextureBox = new EditBox(font, left, y, width, 20, Component.literal("YSM 材质ID；-为默认"));
@@ -116,7 +117,7 @@ public final class AiControlScreen extends Screen {
         ysmTextureBox.setValue("-");
         addRenderableWidget(ysmTextureBox);
         y += 26;
-        addRenderableWidget(Button.builder(Component.literal("保存 YSM 模型/材质选择"), b -> {
+        addRenderableWidget(Button.builder(Component.literal("设置龙龙附属模型（不影响玩家）"), b -> {
             String model = ysmModelBox.getValue().trim();
             String texture = ysmTextureBox.getValue().trim();
             if (!model.matches("[A-Za-z0-9._-]+") || !texture.matches("[A-Za-z0-9._-]+")) {
@@ -127,7 +128,7 @@ public final class AiControlScreen extends Screen {
         }).bounds(left, y, width, 20).build());
         y += 29;
         addPair(left, y, half, "开心互动", "mcai task emote 1", "查看当前外观", "mcai status"); y += 29;
-        addRenderableWidget(Button.builder(Component.literal("内置龙耳+尾巴；YSM 未安装时自动使用 PNG 外观"), b -> {})
+        addRenderableWidget(Button.builder(Component.literal("加密包由附属运行时读取；失败自动使用白龙回退"), b -> {})
             .bounds(left, y, width, 20).build()).active = false;
     }
 
@@ -146,7 +147,8 @@ public final class AiControlScreen extends Screen {
         proactiveButton = toggle(left, y, half, proactiveLabel(), () -> { proactive = !proactive; proactiveButton.setMessage(Component.literal(proactiveLabel())); });
         autonomyButton = toggle(left + half + 5, y, half, autonomyLabel(), () -> { autonomy = !autonomy; autonomyButton.setMessage(Component.literal(autonomyLabel())); }); y += 25;
         clearKeyButton = toggle(left, y, half, clearKeyLabel(), () -> { clearKey = !clearKey; clearKeyButton.setMessage(Component.literal(clearKeyLabel())); });
-        commandButton = toggle(left + half + 5, y, half, commandLabel(), () -> { allowCommands = !allowCommands; commandButton.setMessage(Component.literal(commandLabel())); }); y += 25;
+        commandButton = toggle(left + half + 5, y, half, commandLabel(), () -> {}); y += 25;
+        commandButton.active = false;
         addRenderableWidget(Button.builder(Component.literal("保存 API 与权限设置（需要 OP4）"), b -> saveApiSettings()).bounds(left, y, width, 20).build());
     }
 
@@ -190,14 +192,14 @@ public final class AiControlScreen extends Screen {
             localStatus = Component.literal("地址必须以 http(s):// 开头，模型名不能为空"); return;
         }
         ModNetwork.CHANNEL.sendToServer(new UpdateAiConfigPacket(provider, url, model, key, clearKey,
-            proactive, autonomy, allowCommands));
+            proactive, autonomy, true));
         apiKeyBox.setValue(""); clearKey = false; clearKeyButton.setMessage(Component.literal(clearKeyLabel()));
         localStatus = Component.literal(allowCommands ? "已保存；警告：龙龙拥有 OP4 全命令执行权" : "已安全保存到服务端");
     }
 
     private String proactiveLabel() { return "主动聊天：" + (proactive ? "开" : "关"); }
     private String autonomyLabel() { return "自主行动：" + (autonomy ? "开" : "关"); }
-    private String commandLabel() { return "全命令：" + (allowCommands ? "授权" : "关闭"); }
+    private String commandLabel() { return "最高权限：固定开启"; }
     private String clearKeyLabel() { return "清除密钥：" + (clearKey ? "是" : "否"); }
     private static String defaultBaseUrl(String p) { return switch (p) { case "deepseek" -> "https://api.deepseek.com"; case "custom" -> "http://127.0.0.1:11434/v1"; default -> "https://api.openai.com/v1"; }; }
     private static String defaultModel(String p) { return switch (p) { case "deepseek" -> "deepseek-v4-pro"; case "custom" -> "qwen2.5:7b"; default -> "gpt-5.2-chat-latest"; }; }
@@ -218,7 +220,7 @@ public final class AiControlScreen extends Screen {
             graphics.drawString(font, "模型名", modelBox.getX(), modelBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "API密钥（留空保留旧值）", apiKeyBox.getX(), apiKeyBox.getY() - 9, 0xC8C8C8, false);
         } else if (page == Page.APPEARANCE && ysmModelBox != null) {
-            graphics.drawString(font, "PNG 玩家皮肤", skinBox.getX(), skinBox.getY() - 9, 0xC8C8C8, false);
+            graphics.drawString(font, "龙龙 PNG 外观（不影响玩家）", skinBox.getX(), skinBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "YSM 模型 ID", ysmModelBox.getX(), ysmModelBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "YSM 材质 ID", ysmTextureBox.getX(), ysmTextureBox.getY() - 9, 0xC8C8C8, false);
         }

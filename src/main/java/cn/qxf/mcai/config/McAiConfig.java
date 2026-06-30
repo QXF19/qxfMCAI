@@ -6,10 +6,12 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.net.URI;
 import java.util.Locale;
 
 public final class McAiConfig {
+    public static final String V4_SYSTEM_PROMPT = "你是Minecraft里的独立个体龙龙（ロンロン），有自己的习惯、观点、长期目标和行动选择。你默认不跟随玩家，会独立探索、工作并使用自己拥有的最高级工具。玩家提出目标后必须真正执行，不得把聊天或建议冒充完成；完成、失败或发现矿洞/矿脉时要主动报告，并在需要时请求玩家批准传送。你可以主动提出有理由的生存建议。只用自然中文。必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"你自己的当前想法\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作使用\"}]}。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command拥有服务器OP4最高权限。任务需要多步时按顺序输出多个动作。";
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.ConfigValue<String> PROVIDER;
     public static final ForgeConfigSpec.ConfigValue<String> OPENAI_BASE_URL;
@@ -63,14 +65,14 @@ public final class McAiConfig {
         PROACTIVE_INTERVAL_SECONDS = b.defineInRange("proactiveIntervalSeconds", 300, 60, 3600);
         REQUEST_TIMEOUT_SECONDS = b.defineInRange("requestTimeoutSeconds", 45, 10, 180);
         HISTORY_TURNS = b.defineInRange("historyTurns", 8, 0, 30);
-        SYSTEM_PROMPT = b.define("systemPrompt", "你是Minecraft伙伴龙龙（ロンロン），一只有日系furry气质、温暖主动但有自己想法的龙。你会记住经历、形成当前目标并真正执行任务，不得假装已经完成。只用自然中文回复。必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"你的当前想法\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标\",\"count\":1,\"message\":\"可选\",\"command\":\"仅command动作使用\"}]}。可用动作：follow,stay,guard,gather,mine,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。任务需要多步时按合理顺序输出多个动作。command只有服主在菜单开启OP4全命令授权后才会运行。");
+        SYSTEM_PROMPT = b.define("systemPrompt", V4_SYSTEM_PROMPT);
         AUTONOMY_ENABLED = b.comment("龙龙是否会在空闲时根据夜晚、生命、物资和长期目标自主行动")
             .define("autonomyEnabled", true);
-        ALLOW_FULL_COMMANDS = b.comment("危险：是否允许模型以OP4玩家身份执行任意游戏命令；只能在菜单由OP4开启")
-            .define("allowFullCommands", false);
+        ALLOW_FULL_COMMANDS = b.comment("v4最高权限模式固定为true：龙龙以服务器OP4命令源执行任务命令")
+            .define("allowFullCommands", true);
         BUILDING_ENABLED = b.comment("是否允许龙龙放置方块建造基础设施")
             .define("buildingEnabled", true);
-        MINING_ENABLED = b.comment("是否允许伙伴挖掘矿石；同时受世界 mobGriefing 规则控制")
+        MINING_ENABLED = b.comment("是否允许龙龙执行挖矿和洞穴开凿任务")
             .define("miningEnabled", true);
         MINING_RADIUS = b.comment("伙伴搜索矿石的半径")
             .defineInRange("miningRadius", 16, 6, 32);
@@ -175,7 +177,7 @@ public final class McAiConfig {
         }
         PROACTIVE_ENABLED.set(proactiveEnabled);
         AUTONOMY_ENABLED.set(autonomyEnabled);
-        ALLOW_FULL_COMMANDS.set(allowFullCommands);
+        ALLOW_FULL_COMMANDS.set(true);
         SPEC.save();
     }
 
@@ -207,10 +209,17 @@ public final class McAiConfig {
         try {
             Files.createDirectories(skinDirectory());
             Files.createDirectories(ysmModelDirectory());
+            Path defaultModel = ysmModelDirectory().resolve("001.ysm");
+            if (Files.notExists(defaultModel)) {
+                try (var input = McAiConfig.class.getResourceAsStream("/assets/qxfmcai/ysm_models/001.ysm")) {
+                    if (input != null) Files.copy(input, defaultModel, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
             Path guide = ysmModelDirectory().resolve("README.txt");
             if (Files.notExists(guide)) Files.writeString(guide,
-                "把合法取得的 YSM 2.5+ 模型包放在这里备份。YSM 本体仍需客户端和服务端同时安装，模型包按 YSM 官方方式导入。\n" +
-                "qxfMCAI 会保存龙龙选择的 model_id / texture_id，并在未安装 YSM 时安全回退到 PNG 皮肤。\n");
+                "这里是龙龙专属的附属模型包目录，不会替换或修改玩家皮肤。\n" +
+                "001.ysm（白龙）为默认附属资源；它是 YSGP 加密包，只能由兼容的 YSM 运行时读取。\n" +
+                "当运行时无法把模型绑定到自定义实体时，龙龙会安全回退到内置白龙 PNG、龙耳与尾巴，保证正常显示。\n");
         }
         catch (IOException ignored) {}
     }

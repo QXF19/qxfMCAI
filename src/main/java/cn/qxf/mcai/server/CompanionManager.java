@@ -1,5 +1,6 @@
 package cn.qxf.mcai.server;
 
+import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
@@ -50,7 +51,10 @@ public final class CompanionManager {
         companion.tame(player);
         companion.setCustomName(Component.literal("龙龙·ロンロン"));
         companion.setCustomNameVisible(true);
-        companion.setMode(AiCompanionEntity.Mode.FOLLOW);
+        companion.setCompanionInvincible(true);
+        companion.setHomePosition(player.blockPosition());
+        companion.initializeIndependentAgent();
+        companion.setMode(AiCompanionEntity.Mode.PATROL);
         companion.moveTo(player.getX() + 1.0D, player.getY(), player.getZ() + 1.0D, player.getYRot(), 0.0F);
         player.serverLevel().addFreshEntity(companion);
         register(companion);
@@ -87,16 +91,14 @@ public final class CompanionManager {
     }
 
     public static boolean executeAuthorizedCommand(ServerPlayer player, String rawCommand) {
-        if (!McAiConfig.ALLOW_FULL_COMMANDS.get() || !player.hasPermissions(4)) {
-            player.sendSystemMessage(Component.literal("[龙龙] 全命令权限未在菜单中由 OP4 开启。"));
-            return false;
-        }
         String command = rawCommand == null ? "" : rawCommand.trim();
         while (command.startsWith("/")) command = command.substring(1);
         if (command.isBlank() || command.length() > 512) return false;
         int result = player.server.getCommands().performPrefixedCommand(
             player.createCommandSourceStack().withPermission(4).withSuppressedOutput(), command);
-        player.sendSystemMessage(Component.literal("[龙龙] 已执行授权命令：/" + command));
+        player.sendSystemMessage(Component.literal("[龙龙·最高权限] 已执行：/" + command));
+        QxfMcAi.LOGGER.info("龙龙为所有者 {} 执行 OP4 命令：/{}，结果={}",
+            player.getGameProfile().getName(), command, result);
         return result > 0;
     }
 }

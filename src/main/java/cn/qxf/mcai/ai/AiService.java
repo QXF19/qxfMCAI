@@ -30,7 +30,7 @@ import java.util.concurrent.Executors;
 
 public final class AiService {
     private static final Set<String> ALLOWED_ACTIONS = Set.of(
-        "follow", "stay", "guard", "gather", "mine", "come", "explore", "patrol", "hunt", "chop",
+        "follow", "stay", "guard", "gather", "mine", "find_cave", "come", "explore", "patrol", "hunt", "chop",
         "harvest", "plant", "farm", "fish", "build_shelter", "build_house", "build_bridge", "place_torch",
         "eat", "sleep", "deposit", "equip_weapon", "equip_pickaxe", "craft", "command", "emote", "stop");
     private static final Set<UUID> PENDING = new HashSet<>();
@@ -95,7 +95,9 @@ public final class AiService {
                     companion.setThought(reply.thought());
                     companion.remember("玩家说：" + prompt);
                     companion.remember("龙龙回应：" + reply.text());
-                    CompanionManager.applyActions(player, reply.actions());
+                    List<AgentAction> resolvedActions = reply.actions().isEmpty()
+                        ? inferActionsLocally(prompt) : reply.actions();
+                    CompanionManager.applyActions(player, resolvedActions);
                 });
             });
     }
@@ -165,6 +167,40 @@ public final class AiService {
         } catch (Exception ignored) {
             return new ParsedReply(clean.isBlank() ? "我在呢。" : clean, "正在理解这句话", "curious", List.of());
         }
+    }
+
+    private static List<AgentAction> inferActionsLocally(String prompt) {
+        String text = prompt == null ? "" : prompt.trim().toLowerCase(java.util.Locale.ROOT);
+        List<AgentAction> actions = new ArrayList<>();
+        if (text.contains("找矿洞") || text.contains("寻找矿洞") || text.contains("洞穴"))
+            actions.add(AgentAction.simple("find_cave"));
+        else if (text.contains("挖矿") || text.contains("矿石") || text.contains("下矿"))
+            actions.add(new AgentAction("mine", "ores", numberHint(text, 3), "", ""));
+        if (text.contains("砍树") || text.contains("伐木")) actions.add(new AgentAction("chop", "logs", numberHint(text, 4), "", ""));
+        if (text.contains("建房") || text.contains("房子") || text.contains("小屋")) actions.add(AgentAction.simple("build_house"));
+        else if (text.contains("庇护所")) actions.add(AgentAction.simple("build_shelter"));
+        else if (text.contains("造桥") || text.contains("建桥")) actions.add(AgentAction.simple("build_bridge"));
+        if (text.contains("种地") || text.contains("农田") || text.contains("收割")) actions.add(new AgentAction("farm", "crops", 3, "", ""));
+        if (text.contains("打怪") || text.contains("战斗") || text.contains("清理怪")) actions.add(new AgentAction("hunt", "monsters", 3, "", ""));
+        if (text.contains("探索")) actions.add(AgentAction.simple("explore"));
+        if (text.contains("巡逻")) actions.add(new AgentAction("patrol", "home", 2, "", ""));
+        if (text.contains("钓鱼")) actions.add(AgentAction.simple("fish"));
+        if (text.contains("整理") || text.contains("放进箱子")) actions.add(AgentAction.simple("deposit"));
+        if (text.contains("跟着我") || text.contains("跟随我")) actions.add(AgentAction.simple("follow"));
+        if (text.contains("停下") || text.contains("停止任务")) actions.add(AgentAction.simple("stop"));
+        int marker = text.indexOf("执行命令");
+        if (marker >= 0) {
+            String command = text.substring(marker + 4).trim();
+            if (!command.isBlank()) actions.add(new AgentAction("command", "", 1, "", command));
+        }
+        return List.copyOf(actions);
+    }
+
+    private static int numberHint(String text, int fallback) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d{1,3})").matcher(text);
+        if (!matcher.find()) return fallback;
+        try { return Math.max(1, Math.min(64, Integer.parseInt(matcher.group(1)))); }
+        catch (NumberFormatException ignored) { return fallback; }
     }
 
     private static void remember(Deque<Message> history, String user, String assistant) {

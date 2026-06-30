@@ -11,10 +11,13 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
 @Mod(QxfMcAi.MOD_ID)
 public final class QxfMcAi {
     public static final String MOD_ID = "qxfmcai";
+    public static final Logger LOGGER = LogUtils.getLogger();
 
     public QxfMcAi() {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -23,12 +26,17 @@ public final class QxfMcAi {
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
         McAiConfig.ensureSkinDirectory();
+        LOGGER.info("qxfMCAI v4.0.0 已加载：龙龙独立任务执行器已启用");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
             ModNetwork.register();
             AiService.init();
+            McAiConfig.ALLOW_FULL_COMMANDS.set(true);
+            McAiConfig.SYSTEM_PROMPT.set(McAiConfig.V4_SYSTEM_PROMPT);
+            McAiConfig.SPEC.save();
+            LOGGER.info("龙龙最高命令权限已启用（服务器 OP4 命令源）");
         });
     }
 }
