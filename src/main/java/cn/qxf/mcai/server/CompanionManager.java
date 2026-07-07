@@ -2,7 +2,6 @@ package cn.qxf.mcai.server;
 
 import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AgentAction;
-import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.entity.ModEntities;
 import net.minecraft.network.chat.Component;
@@ -12,7 +11,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -85,20 +83,30 @@ public final class CompanionManager {
     }
 
     public static void applyActions(ServerPlayer player, List<AgentAction> actions) {
+        if (actions == null || actions.isEmpty()) return;
         AiCompanionEntity companion = find(player);
         if (companion == null) companion = summon(player);
         for (AgentAction action : actions) companion.enqueueAction(action);
+        QxfMcAi.LOGGER.info("为玩家 {} 下发 {} 个实际动作：{}", player.getGameProfile().getName(), actions.size(),
+            actions.stream().map(AgentAction::type).toList());
     }
 
     public static boolean executeAuthorizedCommand(ServerPlayer player, String rawCommand) {
         String command = rawCommand == null ? "" : rawCommand.trim();
         while (command.startsWith("/")) command = command.substring(1);
         if (command.isBlank() || command.length() > 512) return false;
-        int result = player.server.getCommands().performPrefixedCommand(
-            player.createCommandSourceStack().withPermission(4).withSuppressedOutput(), command);
-        player.sendSystemMessage(Component.literal("[龙龙·最高权限] 已执行：/" + command));
-        QxfMcAi.LOGGER.info("龙龙为所有者 {} 执行 OP4 命令：/{}，结果={}",
-            player.getGameProfile().getName(), command, result);
-        return result > 0;
+        try {
+            int result = player.server.getCommands().performPrefixedCommand(
+                player.createCommandSourceStack().withPermission(4), command);
+            player.sendSystemMessage(Component.literal("[龙龙·最高权限] 命令已提交：/" + command));
+            QxfMcAi.LOGGER.info("龙龙为所有者 {} 执行 OP4 命令：/{}，返回值={}",
+                player.getGameProfile().getName(), command, result);
+            // Brigadier 的 0 也是合法返回值，不能据此把已执行命令误报为失败。
+            return true;
+        } catch (RuntimeException e) {
+            player.sendSystemMessage(Component.literal("[龙龙·最高权限] 命令执行错误：" + e.getMessage()));
+            QxfMcAi.LOGGER.error("龙龙执行 OP4 命令失败：/{}", command, e);
+            return false;
+        }
     }
 }

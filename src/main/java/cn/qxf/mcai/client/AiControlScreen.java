@@ -39,7 +39,7 @@ public final class AiControlScreen extends Screen {
     private int panelWidth;
     private int panelHeight;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v4.0")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v5.0")); }
 
     @Override
     protected void init() {

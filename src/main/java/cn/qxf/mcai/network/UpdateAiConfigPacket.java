@@ -45,7 +45,7 @@ public record UpdateAiConfigPacket(String provider, String baseUrl, String model
                     message.autonomyEnabled, message.allowFullCommands);
                 sender.sendSystemMessage(Component.literal("[qxfMCAI] API配置已安全保存；密钥不会回传到客户端。")
                     .withStyle(ChatFormatting.GREEN));
-            } catch (IllegalArgumentException error) {
+            } catch (RuntimeException error) {
                 sender.sendSystemMessage(Component.literal("[qxfMCAI] 配置未保存：" + error.getMessage())
                     .withStyle(ChatFormatting.RED));
             }
