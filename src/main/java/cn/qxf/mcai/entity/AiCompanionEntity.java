@@ -104,11 +104,14 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
 
     private final SimpleContainer inventory = new SimpleContainer(27);
+    /** 龙龙私有装备仓：不在玩家可打开的27格背包中显示。 */
+    private final SimpleContainer equipmentStorage = new SimpleContainer(18);
     private final Deque<AgentAction> taskQueue = new ArrayDeque<>();
     private final Deque<String> memories = new ArrayDeque<>();
     private final Deque<BlockPos> buildQueue = new ArrayDeque<>();
     @Nullable private AgentAction currentTask;
     @Nullable private BlockPos miningTarget;
+    @Nullable private BlockPos searchTunnelTarget;
     @Nullable private BlockPos workTarget;
     @Nullable private BlockPos homePosition;
     @Nullable private BlockPos pendingTeleportPosition;
@@ -122,6 +125,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private int dragonLevel = 1;
     private int dragonExperience;
     private int completedTasks;
+    private boolean starterKitGranted;
+    private int centralBuildingIndex;
     private String thought = "想和玩家一起把今天过好";
     private String longTermGoal = "建立安全、温暖的共同基地";
     private String habit = "探索者";
@@ -187,7 +192,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         super.tick();
         if (level().isClientSide) return;
         if (tickCount % 20 == 0) CompanionManager.register(this);
-        if (tickCount % 200 == 1) {
+        if (tickCount % 40 == 1) {
             ensureOwnEquipment();
         }
         if (bubbleTicks > 0 && --bubbleTicks == 0) entityData.set(DATA_BUBBLE, "");
@@ -230,9 +235,15 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             speak("好，我已经立即停下来了。", "focused");
             return;
         }
-        taskQueue.addLast(action);
-        QxfMcAi.LOGGER.info("龙龙任务入队：type={} target={} count={} queue={}",
-            action.type(), action.target(), action.count(), taskQueue.size());
+        if (currentTask == null && taskQueue.isEmpty()) {
+            startTask(action);
+            QxfMcAi.LOGGER.info("龙龙立即开始任务：type={} target={} count={}",
+                action.type(), action.target(), action.count());
+        } else {
+            taskQueue.addLast(action);
+            QxfMcAi.LOGGER.info("龙龙任务入队：type={} target={} count={} queue={}",
+                action.type(), action.target(), action.count(), taskQueue.size());
+        }
     }
 
     private void tickTaskEngine() {
@@ -254,13 +265,21 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             case "stay" -> { setMode(Mode.STAY); finishTask(true, "在这里等你"); }
             case "guard" -> { setMode(Mode.GUARD); equipBestWeapon(); finishTask(true, "开始警戒"); }
             case "gather" -> setWorkMode(Mode.GATHER, "收集附近物品");
-            case "mine" -> { equipBestPickaxe(); setWorkMode(Mode.MINE, "向下寻找矿洞和矿石"); }
-            case "find_cave" -> { equipBestPickaxe(); setWorkMode(Mode.MINE, "独立向下寻找天然矿洞"); }
+            case "mine" -> {
+                equipBestPickaxe();
+                setWorkMode(Mode.MINE, "向下开凿并寻找矿石");
+                prepareUndergroundSearch(false);
+            }
+            case "find_cave" -> {
+                equipBestPickaxe();
+                setWorkMode(Mode.MINE, "独立向下开凿并寻找天然矿洞");
+                prepareUndergroundSearch(true);
+            }
             case "explore" -> setWorkMode(Mode.EXPLORE, "探索周围地形");
             case "patrol" -> setWorkMode(Mode.PATROL, "巡视基地周围");
             case "hunt" -> { equipBestWeapon(); setWorkMode(Mode.HUNT, "狩猎敌对生物"); }
             case "chop" -> { equipBestAxe(); setWorkMode(Mode.LUMBER, "寻找并砍伐树木"); }
-            case "harvest", "plant", "farm" -> setWorkMode(Mode.FARM, "照料并收获农田");
+            case "harvest", "plant", "farm" -> prepareFarmTask(type);
             case "fish" -> startFishing();
             case "build_shelter" -> prepareBuilding(false, false);
             case "build_house" -> prepareBuilding(true, false);
@@ -295,9 +314,11 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 finishTask(true, "回到你身边");
             }
             case "command" -> {
+                String command = !action.command().isBlank() ? action.command()
+                    : (!action.target().isBlank() ? action.target() : action.message());
                 boolean done = getOwner() instanceof ServerPlayer owner
-                    && CompanionManager.executeAuthorizedCommand(owner, action.command());
-                finishTask(done, done ? "执行授权命令" : "命令未授权、为空或执行失败");
+                    && CompanionManager.executeAuthorizedCommand(owner, command);
+                finishTask(done, done ? "执行最高权限命令 /" + command : "命令为空或执行时发生错误");
             }
             case "emote" -> { emote(action.target().isBlank() ? "happy" : action.target(), action.message()); finishTask(true, "互动"); }
             case "stop" -> { taskQueue.clear(); setMode(Mode.STAY); finishTask(true, "停止当前任务"); }
@@ -331,6 +352,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         currentTask = null;
         taskTicks = 0;
         workTarget = null;
+        searchTunnelTarget = null;
         clearMiningTarget();
         if (getMode() == Mode.GATHER || getMode() == Mode.MINE || getMode() == Mode.EXPLORE
             || getMode() == Mode.PATROL || getMode() == Mode.HUNT || getMode() == Mode.LUMBER
@@ -343,11 +365,11 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private void autonomousDecision() {
         if (!(getOwner() instanceof ServerPlayer owner)) return;
         if (getHealth() < getMaxHealth() * 0.45F && hasFood()) enqueueAction(AgentAction.simple("eat"));
-        else if (owner.level().isNight() && !hasBuildingNearby())
-            enqueueAction(new AgentAction("build_shelter", "", 1, "", ""));
+        else if (owner.level().isNight())
+            enqueueAction(new AgentAction("patrol", "home", 2, "", ""));
         else switch (habit) {
             case "矿工" -> enqueueAction(new AgentAction("mine", "ores", 3, "", ""));
-            case "建设者" -> enqueueAction(new AgentAction("build_shelter", "", 1, "", ""));
+            case "建设者" -> enqueueAction(new AgentAction("build_house", "central_base", 1, "", ""));
             case "守卫" -> enqueueAction(new AgentAction("patrol", "", 2, "", ""));
             default -> enqueueAction(new AgentAction(random.nextBoolean() ? "explore" : "find_cave", "", 1, "", ""));
         }
@@ -364,8 +386,9 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         int profile = Math.floorMod(getUUID().hashCode(), 4);
         habit = switch (profile) { case 0 -> "矿工"; case 1 -> "建设者"; case 2 -> "守卫"; default -> "探索者"; };
         ensureOwnEquipment();
+        grantStarterKit();
         if (getMainHandItem().isEmpty()) equipBestWeapon();
-        remember("v4初始化：我习惯做一名" + habit + "，拥有自己的最高级工具与最高权限");
+        remember("v5初始化：我习惯做一名" + habit + "，最高级工具放在自己的隐藏装备空间中");
     }
 
     public void setHomePosition(BlockPos pos) { homePosition = pos == null ? blockPosition() : pos.immutable(); }
@@ -378,11 +401,6 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         ensureTool(Items.NETHERITE_HOE, net.minecraft.world.item.HoeItem.class);
         ensureTool(Items.BOW, BowItem.class);
         ensureTool(Items.FISHING_ROD, FishingRodItem.class);
-        ensureSupply(Items.ARROW, 64);
-        ensureSupply(Items.COOKED_BEEF, 16);
-        ensureSupply(Items.TORCH, 64);
-        ensureSupply(Items.COBBLESTONE, 64);
-        ensureSupply(Items.OAK_PLANKS, 64);
         if (getItemBySlot(EquipmentSlot.HEAD).isEmpty()) setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.NETHERITE_HELMET));
         if (getItemBySlot(EquipmentSlot.CHEST).isEmpty()) setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.NETHERITE_CHESTPLATE));
         if (getItemBySlot(EquipmentSlot.LEGS).isEmpty()) setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.NETHERITE_LEGGINGS));
@@ -391,16 +409,19 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
 
     private void ensureTool(net.minecraft.world.item.Item item, Class<?> type) {
         if (type.isInstance(getMainHandItem().getItem())) return;
-        for (int i = 0; i < inventory.getContainerSize(); i++)
-            if (type.isInstance(inventory.getItem(i).getItem())) return;
-        inventory.addItem(new ItemStack(item));
+        for (int i = 0; i < equipmentStorage.getContainerSize(); i++)
+            if (type.isInstance(equipmentStorage.getItem(i).getItem())) return;
+        equipmentStorage.addItem(new ItemStack(item));
     }
 
-    private void ensureSupply(net.minecraft.world.item.Item item, int count) {
-        int total = 0;
-        for (int i = 0; i < inventory.getContainerSize(); i++)
-            if (inventory.getItem(i).is(item)) total += inventory.getItem(i).getCount();
-        if (total == 0) inventory.addItem(new ItemStack(item, count));
+    private void grantStarterKit() {
+        if (starterKitGranted) return;
+        equipmentStorage.addItem(new ItemStack(Items.ARROW, 64));
+        inventory.addItem(new ItemStack(Items.COOKED_BEEF, 16));
+        inventory.addItem(new ItemStack(Items.TORCH, 64));
+        inventory.addItem(new ItemStack(Items.COBBLESTONE, 64));
+        inventory.addItem(new ItemStack(Items.OAK_PLANKS, 64));
+        starterKitGranted = true;
     }
 
     private void offerIndependentSuggestion() {
@@ -444,8 +465,11 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         ItemEntity item = level().getEntitiesOfClass(ItemEntity.class, getBoundingBox().inflate(14.0D),
                 e -> e.isAlive() && !e.getItem().isEmpty()).stream()
             .min(Comparator.comparingDouble(this::distanceToSqr)).orElse(null);
-        if (item == null) return;
-        if (distanceToSqr(item) > 2.25D) { getNavigation().moveTo(item, 1.2D); return; }
+        if (item == null) {
+            if (currentTask != null && taskTicks > 40) finishTask(false, "扫描完成，附近没有可收集物品");
+            return;
+        }
+        if (distanceToSqr(item) > 2.25D) { getNavigation().moveTo(item, 1.45D); return; }
         ItemStack remainder = inventory.addItem(item.getItem().copy());
         item.setItem(remainder);
         if (remainder.isEmpty()) item.discard();
@@ -473,7 +497,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         }
         if (miningTarget == null || !isValidOre(serverLevel, miningTarget)) {
             clearMiningTarget();
-            if (tickCount % 20 == 0) {
+            if (tickCount % 10 == 0) {
                 miningTarget = findOreBelow(serverLevel);
                 if (miningTarget != null && !miningTarget.equals(lastNotifiedOre)) {
                     lastNotifiedOre = miningTarget.immutable();
@@ -483,15 +507,17 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             }
         }
         if (miningTarget == null) {
-            if (taskTicks > 400) finishTask(false, "向下搜索后没有发现矿石");
+            if (searchTunnelTarget == null) searchTunnelTarget = createTunnelTarget();
+            if (tickCount % 4 == 0) excavateToward(serverLevel, searchTunnelTarget);
+            if (taskTicks > 600) finishTask(false, "已实际向下开凿，但当前范围没有发现矿石");
             return;
         }
         Vec3 center = Vec3.atCenterOf(miningTarget);
         if (position().distanceToSqr(center) > 8.0D) {
-            boolean moving = getNavigation().moveTo(center.x, center.y, center.z, 1.05D);
+            boolean moving = getNavigation().moveTo(center.x, center.y, center.z, 1.35D);
             miningProgress = 0;
             miningStuckTicks = moving ? Math.max(0, miningStuckTicks - 1) : miningStuckTicks + 2;
-            if (miningStuckTicks > 30 || tickCount % 40 == 0) excavateToward(serverLevel, miningTarget);
+            if (miningStuckTicks > 12 || tickCount % 12 == 0) excavateToward(serverLevel, miningTarget);
             return;
         }
         getNavigation().stop();
@@ -515,17 +541,33 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             }
         }
         if (workTarget == null) {
-            if (taskTicks > 600) finishTask(false, "搜索范围内没有找到天然矿洞");
+            if (searchTunnelTarget == null) searchTunnelTarget = createTunnelTarget();
+            if (tickCount % 4 == 0) excavateToward(level, searchTunnelTarget);
+            if (taskTicks > 400) finishTask(false, "已向下开凿搜索，但当前范围没有找到天然矿洞");
             return;
         }
         BlockPos target = workTarget.immutable();
         if (target.distSqr(blockPosition()) > 10.0D) {
-            getNavigation().moveTo(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D, 1.0D);
-            if (tickCount % 20 == 0) excavateToward(level, target);
+            getNavigation().moveTo(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D, 1.35D);
+            if (tickCount % 8 == 0) excavateToward(level, target);
             return;
         }
         finishTask(true, "已抵达天然矿洞 " + target.toShortString());
         offerTeleportToOwner(target, "我已经安全抵达矿洞");
+    }
+
+    private void prepareUndergroundSearch(boolean cave) {
+        searchTunnelTarget = createTunnelTarget();
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        if (cave) workTarget = findCaveBelow(serverLevel);
+        else miningTarget = findOreBelow(serverLevel);
+    }
+
+    private BlockPos createTunnelTarget() {
+        int depth = Math.max(8, McAiConfig.MINING_DEPTH.get());
+        int x = random.nextBoolean() ? 10 : -10;
+        int z = random.nextBoolean() ? 10 : -10;
+        return blockPosition().offset(x, -depth, z);
     }
 
     @Nullable
@@ -592,7 +634,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 return;
             }
         }
-        getNavigation().moveTo(next.getX() + 0.5D, next.getY(), next.getZ() + 0.5D, 1.0D);
+        getNavigation().moveTo(next.getX() + 0.5D, next.getY(), next.getZ() + 0.5D, 1.35D);
         miningStuckTicks = 0;
     }
 
@@ -622,7 +664,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     private void exploreTick() {
-        if (tickCount % 80 != 0) return;
+        if (tickCount % 20 != 0) return;
         if (workTarget == null || position().distanceToSqr(Vec3.atCenterOf(workTarget)) < 9.0D) {
             if (workTarget != null) completeWorkUnit();
             int radius = getMode() == Mode.PATROL ? 12 : 28;
@@ -631,7 +673,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 random.nextInt(radius * 2 + 1) - radius);
             workTarget = level().getHeightmapPos(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, rough);
         }
-        getNavigation().moveTo(workTarget.getX() + 0.5D, workTarget.getY(), workTarget.getZ() + 0.5D, 1.0D);
+        getNavigation().moveTo(workTarget.getX() + 0.5D, workTarget.getY(), workTarget.getZ() + 0.5D, 1.35D);
     }
 
     private void huntTick() {
@@ -644,15 +686,19 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             Monster monster = level().getEntitiesOfClass(Monster.class, getBoundingBox().inflate(24), Mob::isAlive).stream()
                 .min(Comparator.comparingDouble(this::distanceToSqr)).orElse(null);
             if (monster != null) setTarget(monster);
+            else if (currentTask != null && taskTicks > 80) finishTask(false, "巡查完成，附近没有敌对生物");
         }
     }
 
     private void lumberTick() {
-        if (!(level() instanceof ServerLevel serverLevel) || tickCount % 10 != 0) return;
+        if (!(level() instanceof ServerLevel serverLevel) || tickCount % 4 != 0) return;
         if (workTarget == null || !serverLevel.getBlockState(workTarget).is(BlockTags.LOGS))
             workTarget = findNearestBlock(serverLevel, 12, state -> state.is(BlockTags.LOGS));
-        if (workTarget == null) return;
-        if (workTarget.distSqr(blockPosition()) > 6.0D) { getNavigation().moveTo(workTarget.getX(), workTarget.getY(), workTarget.getZ(), 1.0D); return; }
+        if (workTarget == null) {
+            if (currentTask != null && taskTicks > 60) finishTask(false, "扫描完成，附近没有树木");
+            return;
+        }
+        if (workTarget.distSqr(blockPosition()) > 6.0D) { getNavigation().moveTo(workTarget.getX(), workTarget.getY(), workTarget.getZ(), 1.35D); return; }
         if (!(getMainHandItem().getItem() instanceof AxeItem) && !equipBestAxe()) {
             finishTask(false, "背包里没有斧头");
             return;
@@ -660,14 +706,38 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (breakIntoInventory(serverLevel, workTarget, getMainHandItem())) { completeWorkUnit(); workTarget = null; }
     }
 
+    private void prepareFarmTask(String type) {
+        setWorkMode(Mode.FARM, type.equals("plant") ? "扫描空耕地并播种" : "立即扫描附近农田");
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        workTarget = type.equals("plant") ? findPlantingSpot(serverLevel) : findMatureCrop(serverLevel);
+        if (workTarget == null && type.equals("farm") && findSeed() >= 0)
+            workTarget = findPlantingSpot(serverLevel);
+        if (workTarget == null) finishFarmScan(type.equals("farm"));
+    }
+
     private void farmTick() {
-        if (!(level() instanceof ServerLevel serverLevel) || tickCount % 10 != 0) return;
-        if (currentTask != null && currentTask.type().equals("plant")) { plantCropTick(serverLevel); return; }
+        if (!(level() instanceof ServerLevel serverLevel) || tickCount % 4 != 0 || currentTask == null) return;
+        String type = currentTask.type();
+        if (type.equals("plant") || (type.equals("farm") && workTarget != null
+            && serverLevel.getBlockState(workTarget).is(Blocks.FARMLAND))) {
+            plantCropTick(serverLevel);
+            return;
+        }
         if (workTarget == null || !(serverLevel.getBlockState(workTarget).getBlock() instanceof CropBlock crop)
             || !crop.isMaxAge(serverLevel.getBlockState(workTarget)))
-            workTarget = findNearestBlock(serverLevel, 12, state -> state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state));
-        if (workTarget == null) return;
-        if (workTarget.distSqr(blockPosition()) > 6.0D) { getNavigation().moveTo(workTarget.getX(), workTarget.getY(), workTarget.getZ(), 1.0D); return; }
+            workTarget = findMatureCrop(serverLevel);
+        if (workTarget == null) {
+            if (type.equals("farm") && findSeed() >= 0) {
+                workTarget = findPlantingSpot(serverLevel);
+                if (workTarget != null) { plantCropTick(serverLevel); return; }
+            }
+            finishFarmScan(type.equals("farm"));
+            return;
+        }
+        if (workTarget.distSqr(blockPosition()) > 6.0D) {
+            getNavigation().moveTo(workTarget.getX(), workTarget.getY(), workTarget.getZ(), 1.35D);
+            return;
+        }
         BlockState state = serverLevel.getBlockState(workTarget);
         CropBlock crop = (CropBlock) state.getBlock();
         for (ItemStack drop : Block.getDrops(state, serverLevel, workTarget, serverLevel.getBlockEntity(workTarget), this, ItemStack.EMPTY)) {
@@ -680,17 +750,30 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         workTarget = null;
     }
 
+    @Nullable
+    private BlockPos findMatureCrop(ServerLevel level) {
+        return findNearestBlock(level, 16,
+            state -> state.getBlock() instanceof CropBlock crop && crop.isMaxAge(state));
+    }
+
+    private void finishFarmScan(boolean scanCountsAsSuccess) {
+        boolean success = workProgress > 0 || scanCountsAsSuccess;
+        finishTask(success, workProgress > 0
+            ? "农田扫描完成，已处理 " + workProgress + " 格"
+            : "农田扫描完成，附近暂无成熟作物或可播种耕地");
+    }
+
     private void plantCropTick(ServerLevel serverLevel) {
         int seedSlot = findSeed();
-        if (seedSlot < 0) { finishTask(false, "背包里没有可种植的种子"); return; }
+        if (seedSlot < 0) { finishFarmScan(currentTask != null && currentTask.type().equals("farm")); return; }
         if (workTarget == null || !serverLevel.getBlockState(workTarget).is(Blocks.FARMLAND)
             || !serverLevel.getBlockState(workTarget.above()).isAir())
             workTarget = findPlantingSpot(serverLevel);
         if (workTarget == null) {
-            finishTask(false, "附近没有空着的耕地"); return;
+            finishFarmScan(currentTask != null && currentTask.type().equals("farm")); return;
         }
         if (workTarget.distSqr(blockPosition()) > 8.0D) {
-            getNavigation().moveTo(workTarget.getX(), workTarget.getY() + 1, workTarget.getZ(), 1.0D);
+            getNavigation().moveTo(workTarget.getX(), workTarget.getY() + 1, workTarget.getZ(), 1.35D);
             return;
         }
         ItemStack seeds = inventory.getItem(seedSlot);
@@ -750,7 +833,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private void prepareBuilding(boolean house, boolean bridge) {
         if (!McAiConfig.BUILDING_ENABLED.get()) { finishTask(false, "服务器关闭了建造权限"); return; }
         buildQueue.clear();
-        BlockPos base = blockPosition().relative(getDirection(), 3).below();
+        BlockPos base = bridge ? blockPosition().relative(getDirection(), 3).below() : nextCentralBuildingSite();
         if (bridge) {
             Direction direction = getDirection();
             Direction side = direction.getClockWise();
@@ -766,15 +849,34 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 }
             for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++) buildQueue.add(base.offset(x, height, z));
         }
-        setWorkMode(Mode.BUILD, bridge ? "建造桥梁" : house ? "建造房屋" : "搭建生存庇护所");
+        setWorkMode(Mode.BUILD, bridge ? "建造桥梁" : house ? "在基地建筑区建造房屋" : "在基地建筑区搭建庇护所");
+    }
+
+    private BlockPos nextCentralBuildingSite() {
+        BlockPos center = homePosition == null ? blockPosition() : homePosition;
+        int slot = centralBuildingIndex++;
+        int column = slot % 4;
+        int row = slot / 4;
+        BlockPos rough = center.offset(10 + column * 12, 0, 10 + row * 12);
+        if (level() instanceof ServerLevel serverLevel)
+            return serverLevel.getHeightmapPos(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, rough);
+        return rough;
     }
 
     private void buildTick() {
-        if (!(level() instanceof ServerLevel serverLevel) || tickCount % 5 != 0) return;
-        if (buildQueue.isEmpty()) { completeWorkUnit(); return; }
+        if (!(level() instanceof ServerLevel serverLevel) || tickCount % 2 != 0) return;
+        if (buildQueue.isEmpty()) {
+            boolean needsAnother = currentTask != null && workProgress + 1 < workGoal;
+            completeWorkUnit();
+            if (needsAnother && currentTask != null) {
+                String type = currentTask.type();
+                prepareBuilding(type.equals("build_house"), type.equals("build_bridge"));
+            }
+            return;
+        }
         BlockPos pos = buildQueue.peekFirst();
         if (!serverLevel.getWorldBorder().isWithinBounds(pos)) { buildQueue.removeFirst(); return; }
-        if (pos.distSqr(blockPosition()) > 20.0D) { getNavigation().moveTo(pos.getX(), pos.getY(), pos.getZ(), 1.0D); return; }
+        if (pos.distSqr(blockPosition()) > 20.0D) { getNavigation().moveTo(pos.getX(), pos.getY(), pos.getZ(), 1.35D); return; }
         if (!serverLevel.getBlockState(pos).canBeReplaced()) { buildQueue.removeFirst(); return; }
         int slot = findBuildingBlock();
         if (slot < 0) { finishTask(false, "背包里没有可用建筑方块"); return; }
@@ -911,19 +1013,6 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         return false;
     }
 
-    private boolean hasBuildingNearby() {
-        BlockPos center = blockPosition();
-        BlockPos min = center.offset(-8, 0, -8);
-        BlockPos max = center.offset(8, 5, 8);
-        int placed = 0;
-        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-            BlockState state = level().getBlockState(pos);
-            if ((state.is(BlockTags.PLANKS) || state.is(BlockTags.LOGS) || state.is(Blocks.COBBLESTONE)
-                || state.is(Blocks.BRICKS)) && ++placed > 24) return true;
-        }
-        return false;
-    }
-
     public void openInventory(ServerPlayer player) {
         player.openMenu(new SimpleMenuProvider(
             (id, playerInventory, ignored) -> ChestMenu.threeRows(id, playerInventory, inventory),
@@ -937,8 +1026,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private boolean equipBest(java.util.function.Predicate<ItemStack> predicate) {
         int best = -1;
         int score = -1;
-        for (int i = 0; i < inventory.getContainerSize(); i++) {
-            ItemStack stack = inventory.getItem(i);
+        for (int i = 0; i < equipmentStorage.getContainerSize(); i++) {
+            ItemStack stack = equipmentStorage.getItem(i);
             if (!predicate.test(stack)) continue;
             int current = stack.getItem() instanceof TieredItem tiered ? tiered.getTier().getLevel() * 100 - stack.getDamageValue() : 50;
             if (current > score) { score = current; best = i; }
@@ -948,17 +1037,19 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     private void equipFromSlot(int slot) {
-        ItemStack next = inventory.removeItemNoUpdate(slot);
+        ItemStack next = equipmentStorage.removeItemNoUpdate(slot);
         ItemStack old = getMainHandItem();
         setItemSlot(EquipmentSlot.MAINHAND, next);
         if (!old.isEmpty()) {
-            ItemStack remainder = inventory.addItem(old);
+            ItemStack remainder = isHiddenEquipment(old)
+                ? equipmentStorage.addItem(old) : inventory.addItem(old);
             if (!remainder.isEmpty()) spawnAtLocation(remainder);
         }
     }
 
     private int findTool(Class<?> type) {
-        for (int i = 0; i < inventory.getContainerSize(); i++) if (type.isInstance(inventory.getItem(i).getItem())) return i;
+        for (int i = 0; i < equipmentStorage.getContainerSize(); i++)
+            if (type.isInstance(equipmentStorage.getItem(i).getItem())) return i;
         return -1;
     }
 
@@ -967,11 +1058,17 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         return -1;
     }
 
-    private boolean hasArrows() { return findItem(Items.ARROW) >= 0; }
+    private int findHiddenItem(net.minecraft.world.item.Item item) {
+        for (int i = 0; i < equipmentStorage.getContainerSize(); i++)
+            if (equipmentStorage.getItem(i).is(item)) return i;
+        return -1;
+    }
+
+    private boolean hasArrows() { return findHiddenItem(Items.ARROW) >= 0; }
 
     @Override
     public void performRangedAttack(LivingEntity target, float power) {
-        int arrowSlot = findItem(Items.ARROW);
+        int arrowSlot = findHiddenItem(Items.ARROW);
         if (arrowSlot < 0 || !(level() instanceof ServerLevel serverLevel)) return;
         AbstractArrow arrow = ProjectileUtil.getMobArrow(this, new ItemStack(Items.ARROW), power);
         double dx = target.getX() - getX();
@@ -982,7 +1079,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             14 - serverLevel.getDifficulty().getId() * 4);
         playSound(SoundEvents.SKELETON_SHOOT, 1.0F, 1.0F / (random.nextFloat() * 0.4F + 0.8F));
         serverLevel.addFreshEntity(arrow);
-        inventory.getItem(arrowSlot).shrink(1);
+        equipmentStorage.getItem(arrowSlot).shrink(1);
         getMainHandItem().hurtAndBreak(1, this, entity -> entity.broadcastBreakEvent(EquipmentSlot.MAINHAND));
     }
 
@@ -1001,6 +1098,12 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             if (stack.getItem() instanceof BlockItem block && block.getBlock().defaultBlockState().is(tag)) return i;
         }
         return -1;
+    }
+
+    private static boolean isHiddenEquipment(ItemStack stack) {
+        return stack.getItem() instanceof DiggerItem || stack.getItem() instanceof SwordItem
+            || stack.getItem() instanceof BowItem || stack.getItem() instanceof FishingRodItem
+            || stack.is(Items.ARROW);
     }
 
     public void speak(String text, String emotion) {
@@ -1037,10 +1140,16 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             ItemStack stack = inventory.getItem(i);
             if (!stack.isEmpty()) items.add(stack.getHoverName().getString() + "x" + stack.getCount());
         }
+        List<String> equipment = new ArrayList<>();
+        for (int i = 0; i < equipmentStorage.getContainerSize(); i++) {
+            ItemStack stack = equipmentStorage.getItem(i);
+            if (!stack.isEmpty()) equipment.add(stack.getHoverName().getString() + "x" + stack.getCount());
+        }
         return "龙龙等级=" + dragonLevel + "，经验=" + dragonExperience + "，习惯=" + habit + "，已完成任务=" + completedTasks
             + "，模式=" + getMode().chinese + "，当前活动=" + getActivity() + "，想法=" + thought
             + "，长期目标=" + longTermGoal + "，装备=" + getMainHandItem().getHoverName().getString()
-            + "，背包=" + String.join("、", items) + "，近期记忆=" + String.join("；", memories);
+            + "，隐藏装备仓=" + String.join("、", equipment) + "，27格背包=" + String.join("、", items)
+            + "，近期记忆=" + String.join("；", memories);
     }
 
     public void remember(String memory) {
@@ -1122,12 +1231,15 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         tag.putInt("DragonLevel", dragonLevel);
         tag.putInt("DragonExperience", dragonExperience);
         tag.putInt("DragonCompletedTasks", completedTasks);
-        tag.putInt("DragonDataVersion", 4);
+        tag.putBoolean("DragonStarterKitGranted", starterKitGranted);
+        tag.putInt("DragonCentralBuildingIndex", centralBuildingIndex);
+        tag.putInt("DragonDataVersion", 5);
         tag.putString("DragonHabit", habit);
         if (homePosition != null) tag.putLong("DragonHome", homePosition.asLong());
         tag.putString("YsmModel", getYsmModel());
         tag.putString("YsmTexture", getYsmTexture());
         tag.put("DragonInventory", inventory.createTag());
+        tag.put("DragonEquipmentStorage", equipmentStorage.createTag());
         ListTag memoryTag = new ListTag();
         for (String memory : memories) memoryTag.add(StringTag.valueOf(memory));
         tag.put("DragonMemories", memoryTag);
@@ -1150,15 +1262,32 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         dragonLevel = Math.max(1, tag.getInt("DragonLevel"));
         dragonExperience = Math.max(0, tag.getInt("DragonExperience"));
         completedTasks = Math.max(0, tag.getInt("DragonCompletedTasks"));
+        starterKitGranted = dataVersion < 5 || tag.getBoolean("DragonStarterKitGranted");
+        centralBuildingIndex = Math.max(0, tag.getInt("DragonCentralBuildingIndex"));
         habit = sanitize(tag.getString("DragonHabit"), 32, habit);
         if (tag.contains("DragonHome", Tag.TAG_LONG)) homePosition = BlockPos.of(tag.getLong("DragonHome"));
         if (dataVersion < 4) setYsmSelection("001", "-");
         else setYsmSelection(tag.getString("YsmModel"), tag.getString("YsmTexture"));
         if (tag.contains("DragonInventory", Tag.TAG_LIST)) inventory.fromTag(tag.getList("DragonInventory", Tag.TAG_COMPOUND));
+        if (tag.contains("DragonEquipmentStorage", Tag.TAG_LIST))
+            equipmentStorage.fromTag(tag.getList("DragonEquipmentStorage", Tag.TAG_COMPOUND));
+        if (dataVersion < 5) moveVisibleEquipmentToHidden();
         memories.clear();
         ListTag memoryTag = tag.getList("DragonMemories", Tag.TAG_STRING);
         for (int i = 0; i < memoryTag.size(); i++) remember(memoryTag.getString(i));
         initializeIndependentAgent();
+    }
+
+    private void moveVisibleEquipmentToHidden() {
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty() || !isHiddenEquipment(stack)) continue;
+            ItemStack moved = inventory.removeItemNoUpdate(i);
+            ItemStack remainder = equipmentStorage.addItem(moved);
+            if (!remainder.isEmpty()) inventory.setItem(i, remainder);
+        }
+        inventory.setChanged();
+        equipmentStorage.setChanged();
     }
 
     private void clearMiningTarget() {
@@ -1167,6 +1296,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         miningTarget = null;
         miningProgress = 0;
         miningStuckTicks = 0;
+        searchTunnelTarget = null;
     }
 
     private static String sanitize(String value, int max, String fallback) {

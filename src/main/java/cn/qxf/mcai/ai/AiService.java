@@ -1,5 +1,6 @@
 package cn.qxf.mcai.ai;
 
+import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.server.CompanionManager;
@@ -59,14 +60,25 @@ public final class AiService {
     public static void ask(ServerPlayer player, String prompt, boolean proactive) {
         init();
         UUID playerId = player.getUUID();
+        // 任务意图先在服务端确定性执行，API 只负责补充人格化回复和复杂计划。
+        // 这样即使模型只说“我知道了”、返回了坏 JSON 或网络很慢，任务也不会丢失。
+        List<AgentAction> immediateActions = inferActionsLocally(prompt);
+        if (!immediateActions.isEmpty()) {
+            CompanionManager.applyActions(player, immediateActions);
+            if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 已立即开始执行：" +
+                    immediateActions.stream().map(AgentAction::type).reduce((a, b) -> a + " → " + b).orElse("任务"))
+                .withStyle(ChatFormatting.GREEN));
+        }
         synchronized (PENDING) {
             if (PENDING.contains(playerId)) {
-                if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 我正在认真做上一件事，稍等一下呀。")
+                if (!proactive && immediateActions.isEmpty()) player.sendSystemMessage(Component.literal("[龙龙] 我正在认真回应上一句话；新任务仍可直接用菜单或命令下达。")
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
                 return;
             }
             if (!isConfigured()) {
-                if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 尚未配置API。请按 M 打开菜单，在“API 设置”中填写并保存。")
+                if (!proactive) player.sendSystemMessage(Component.literal(immediateActions.isEmpty()
+                        ? "[qxfMCAI] 尚未配置API；按 M 填写后可聊天。菜单、命令和可识别任务仍可离线执行。"
+                        : "[qxfMCAI] API 未配置，但任务引擎已经离线开始执行。")
                     .withStyle(ChatFormatting.YELLOW));
                 return;
             }
@@ -83,7 +95,8 @@ public final class AiService {
                 player.getServer().execute(() -> {
                     synchronized (PENDING) { PENDING.remove(playerId); }
                     if (error != null) {
-                        if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 请求失败：" + safeError(error))
+                        if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 聊天请求失败：" + safeError(error)
+                                + (immediateActions.isEmpty() ? "" : "；已识别的任务仍在执行。"))
                             .withStyle(ChatFormatting.RED));
                         return;
                     }
@@ -95,9 +108,13 @@ public final class AiService {
                     companion.setThought(reply.thought());
                     companion.remember("玩家说：" + prompt);
                     companion.remember("龙龙回应：" + reply.text());
-                    List<AgentAction> resolvedActions = reply.actions().isEmpty()
-                        ? inferActionsLocally(prompt) : reply.actions();
-                    CompanionManager.applyActions(player, resolvedActions);
+                    if (immediateActions.isEmpty()) {
+                        List<AgentAction> resolvedActions = reply.actions().isEmpty()
+                            ? inferActionsLocally(prompt) : reply.actions();
+                        CompanionManager.applyActions(player, resolvedActions);
+                        if (resolvedActions.isEmpty())
+                            QxfMcAi.LOGGER.info("龙龙将本次输入识别为纯聊天：{}", prompt);
+                    }
                 });
             });
     }
@@ -111,7 +128,7 @@ public final class AiService {
             responseFormat.addProperty("type", "json_object");
             body.add("response_format", responseFormat);
             JsonArray messages = new JsonArray();
-            messages.add(messageJson("system", McAiConfig.SYSTEM_PROMPT.get()));
+            messages.add(messageJson("system", McAiConfig.systemPrompt()));
             Deque<Message> history = HISTORY.computeIfAbsent(playerId, ignored -> new ArrayDeque<>());
             synchronized (history) {
                 for (Message old : history) messages.add(messageJson(old.role(), old.content()));
@@ -172,15 +189,16 @@ public final class AiService {
     private static List<AgentAction> inferActionsLocally(String prompt) {
         String text = prompt == null ? "" : prompt.trim().toLowerCase(java.util.Locale.ROOT);
         List<AgentAction> actions = new ArrayList<>();
-        if (text.contains("找矿洞") || text.contains("寻找矿洞") || text.contains("洞穴"))
+        if (text.contains("找矿洞") || text.contains("寻找矿洞") || text.contains("天然矿洞") || text.contains("洞穴"))
             actions.add(AgentAction.simple("find_cave"));
-        else if (text.contains("挖矿") || text.contains("矿石") || text.contains("下矿"))
+        else if (text.contains("挖矿") || text.contains("矿石") || text.contains("下矿") || text.contains("采矿"))
             actions.add(new AgentAction("mine", "ores", numberHint(text, 3), "", ""));
         if (text.contains("砍树") || text.contains("伐木")) actions.add(new AgentAction("chop", "logs", numberHint(text, 4), "", ""));
         if (text.contains("建房") || text.contains("房子") || text.contains("小屋")) actions.add(AgentAction.simple("build_house"));
         else if (text.contains("庇护所")) actions.add(AgentAction.simple("build_shelter"));
         else if (text.contains("造桥") || text.contains("建桥")) actions.add(AgentAction.simple("build_bridge"));
-        if (text.contains("种地") || text.contains("农田") || text.contains("收割")) actions.add(new AgentAction("farm", "crops", 3, "", ""));
+        if (text.contains("种地") || text.contains("农田") || text.contains("收割") || text.contains("农作"))
+            actions.add(new AgentAction("farm", "crops", numberHint(text, 3), "", ""));
         if (text.contains("打怪") || text.contains("战斗") || text.contains("清理怪")) actions.add(new AgentAction("hunt", "monsters", 3, "", ""));
         if (text.contains("探索")) actions.add(AgentAction.simple("explore"));
         if (text.contains("巡逻")) actions.add(new AgentAction("patrol", "home", 2, "", ""));
@@ -188,12 +206,23 @@ public final class AiService {
         if (text.contains("整理") || text.contains("放进箱子")) actions.add(AgentAction.simple("deposit"));
         if (text.contains("跟着我") || text.contains("跟随我")) actions.add(AgentAction.simple("follow"));
         if (text.contains("停下") || text.contains("停止任务")) actions.add(AgentAction.simple("stop"));
-        int marker = text.indexOf("执行命令");
-        if (marker >= 0) {
-            String command = text.substring(marker + 4).trim();
-            if (!command.isBlank()) actions.add(new AgentAction("command", "", 1, "", command));
-        }
+        String command = extractCommand(text);
+        if (!command.isBlank()) actions.add(new AgentAction("command", "", 1, "", command));
         return List.copyOf(actions);
+    }
+
+    private static String extractCommand(String text) {
+        String[] markers = {"执行命令", "运行命令", "使用命令", "输入命令"};
+        for (String marker : markers) {
+            int index = text.indexOf(marker);
+            if (index < 0) continue;
+            String command = text.substring(index + marker.length()).trim();
+            while (command.startsWith(":" ) || command.startsWith("：") || command.startsWith("/"))
+                command = command.substring(1).trim();
+            return command;
+        }
+        if (text.startsWith("/")) return text.substring(1).trim();
+        return "";
     }
 
     private static int numberHint(String text, int fallback) {

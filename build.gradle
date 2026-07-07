@@ -30,16 +30,23 @@ minecraft {
     }
 }
 
-repositories { mavenCentral() }
+repositories {
+    mavenCentral()
+    maven { url = 'https://api.modrinth.com/maven' }
+}
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    if (!project.hasProperty('qxfNoYsm')) {
+        runtimeOnly fg.deobf("maven.modrinth:86xjpqqS:Zqooxsd2")
+    }
 }
 
 tasks.named('processResources', ProcessResources).configure {
     def replaceProperties = [minecraft_version: minecraft_version, forge_version: forge_version,
                              mod_id: mod_id, mod_name: mod_name, mod_version: mod_version,
-                             mod_authors: mod_authors]
+                             mod_authors: mod_authors,
+                             ysm_mandatory: !project.hasProperty('qxfNoYsm')]
     inputs.properties replaceProperties
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]
@@ -62,4 +69,3 @@ jar {
     }
     finalizedBy 'reobfJar'
 }
-

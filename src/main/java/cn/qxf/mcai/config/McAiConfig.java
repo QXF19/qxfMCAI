@@ -11,7 +11,7 @@ import java.net.URI;
 import java.util.Locale;
 
 public final class McAiConfig {
-    public static final String V4_SYSTEM_PROMPT = "你是Minecraft里的独立个体龙龙（ロンロン），有自己的习惯、观点、长期目标和行动选择。你默认不跟随玩家，会独立探索、工作并使用自己拥有的最高级工具。玩家提出目标后必须真正执行，不得把聊天或建议冒充完成；完成、失败或发现矿洞/矿脉时要主动报告，并在需要时请求玩家批准传送。你可以主动提出有理由的生存建议。只用自然中文。必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"你自己的当前想法\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作使用\"}]}。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command拥有服务器OP4最高权限。任务需要多步时按顺序输出多个动作。";
+    public static final String V5_SYSTEM_PROMPT = "你是Minecraft里的独立个体龙龙（ロンロン），有自己的习惯、观点、长期目标和行动选择。玩家提出任务或命令时必须立即给出可执行动作，不得只回复‘我知道了’或‘我在呢’；聊天不能冒充任务完成。完成、失败、发现矿洞或矿脉时主动报告。工具和武器存放在你自己的隐藏装备空间，不占玩家可见的27格背包。只用自然中文。必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"当前想法\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作填写原始命令\"}]}。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command使用服务器OP4权限。";
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.ConfigValue<String> PROVIDER;
     public static final ForgeConfigSpec.ConfigValue<String> OPENAI_BASE_URL;
@@ -65,10 +65,10 @@ public final class McAiConfig {
         PROACTIVE_INTERVAL_SECONDS = b.defineInRange("proactiveIntervalSeconds", 300, 60, 3600);
         REQUEST_TIMEOUT_SECONDS = b.defineInRange("requestTimeoutSeconds", 45, 10, 180);
         HISTORY_TURNS = b.defineInRange("historyTurns", 8, 0, 30);
-        SYSTEM_PROMPT = b.define("systemPrompt", V4_SYSTEM_PROMPT);
+        SYSTEM_PROMPT = b.define("systemPrompt", V5_SYSTEM_PROMPT);
         AUTONOMY_ENABLED = b.comment("龙龙是否会在空闲时根据夜晚、生命、物资和长期目标自主行动")
             .define("autonomyEnabled", true);
-        ALLOW_FULL_COMMANDS = b.comment("v4最高权限模式固定为true：龙龙以服务器OP4命令源执行任务命令")
+        ALLOW_FULL_COMMANDS = b.comment("v5兼容字段：龙龙始终以服务器OP4命令源执行明确的命令任务")
             .define("allowFullCommands", true);
         BUILDING_ENABLED = b.comment("是否允许龙龙放置方块建造基础设施")
             .define("buildingEnabled", true);
@@ -128,11 +128,13 @@ public final class McAiConfig {
     }
 
     public static void setProvider(String provider) {
+        ensureConfigLoaded();
         PROVIDER.set(provider.toLowerCase(Locale.ROOT));
         SPEC.save();
     }
 
     public static void setModel(String model) {
+        ensureConfigLoaded();
         switch (provider()) {
             case "deepseek" -> DEEPSEEK_MODEL.set(model);
             case "custom" -> CUSTOM_MODEL.set(model);
@@ -145,6 +147,7 @@ public final class McAiConfig {
                                                    String apiKey, boolean clearApiKey,
                                                    boolean proactiveEnabled, boolean autonomyEnabled,
                                                    boolean allowFullCommands) {
+        ensureConfigLoaded();
         String normalizedProvider = provider.toLowerCase(Locale.ROOT);
         if (!validProvider(normalizedProvider)) throw new IllegalArgumentException("不支持的提供商");
         String normalizedUrl = normalizeBaseUrl(baseUrl);
@@ -177,8 +180,16 @@ public final class McAiConfig {
         }
         PROACTIVE_ENABLED.set(proactiveEnabled);
         AUTONOMY_ENABLED.set(autonomyEnabled);
-        ALLOW_FULL_COMMANDS.set(true);
         SPEC.save();
+    }
+
+    /** v5 的核心动作契约不依赖旧世界中遗留的 v2/v3 提示词。 */
+    public static String systemPrompt() {
+        return V5_SYSTEM_PROMPT;
+    }
+
+    private static void ensureConfigLoaded() {
+        if (!SPEC.isLoaded()) throw new IllegalStateException("Forge 服务端配置尚未完成绑定，请进入世界后再保存");
     }
 
     private static String normalizeBaseUrl(String value) {

@@ -23,25 +23,36 @@ import net.minecraft.resources.ResourceLocation;
 public final class DragonFurryLayer extends RenderLayer<AiCompanionEntity, PlayerModel<AiCompanionEntity>> {
     public static final ModelLayerLocation LAYER = new ModelLayerLocation(
         new ResourceLocation(QxfMcAi.MOD_ID, "dragon_furry"), "main");
-    private final ModelPart ears;
+    private final ModelPart headDecor;
     private final ModelPart tail;
+    private final ModelPart wings;
 
     public DragonFurryLayer(RenderLayerParent<AiCompanionEntity, PlayerModel<AiCompanionEntity>> parent,
                             EntityModelSet models) {
         super(parent);
         ModelPart root = models.bakeLayer(LAYER);
-        ears = root.getChild("ears");
+        headDecor = root.getChild("head_decor");
         tail = root.getChild("tail");
+        wings = root.getChild("wings");
     }
 
     public static LayerDefinition createBodyLayer() {
         MeshDefinition mesh = new MeshDefinition();
         PartDefinition root = mesh.getRoot();
-        root.addOrReplaceChild("ears", CubeListBuilder.create().texOffs(0, 0)
+        root.addOrReplaceChild("head_decor", CubeListBuilder.create().texOffs(0, 0)
             .addBox(-4.0F, -11.0F, -1.0F, 2.0F, 4.0F, 1.0F)
-            .texOffs(6, 0).addBox(2.0F, -11.0F, -1.0F, 2.0F, 4.0F, 1.0F), PartPose.ZERO);
+            .texOffs(6, 0).addBox(2.0F, -11.0F, -1.0F, 2.0F, 4.0F, 1.0F)
+            .texOffs(12, 0).addBox(-3.5F, -14.0F, -0.5F, 1.0F, 5.0F, 1.0F)
+            .texOffs(16, 0).addBox(2.5F, -14.0F, -0.5F, 1.0F, 5.0F, 1.0F)
+            .texOffs(0, 8).addBox(-2.0F, -4.5F, -6.0F, 4.0F, 2.5F, 3.0F), PartPose.ZERO);
         root.addOrReplaceChild("tail", CubeListBuilder.create().texOffs(16, 16)
-            .addBox(-1.5F, 7.0F, 1.5F, 3.0F, 3.0F, 9.0F), PartPose.rotation(0.45F, 0.0F, 0.0F));
+            .addBox(-1.5F, 7.0F, 1.5F, 3.0F, 3.0F, 9.0F)
+            .texOffs(40, 16).addBox(-1.0F, 7.5F, 10.0F, 2.0F, 2.0F, 7.0F),
+            PartPose.rotation(0.45F, 0.0F, 0.0F));
+        root.addOrReplaceChild("wings", CubeListBuilder.create().texOffs(0, 32)
+            .addBox(-10.0F, -1.0F, 1.5F, 9.0F, 1.0F, 8.0F)
+            .texOffs(28, 32).addBox(1.0F, -1.0F, 1.5F, 9.0F, 1.0F, 8.0F),
+            PartPose.rotation(0.20F, 0.0F, 0.0F));
         return LayerDefinition.create(mesh, 64, 64);
     }
 
@@ -52,12 +63,14 @@ public final class DragonFurryLayer extends RenderLayer<AiCompanionEntity, Playe
         VertexConsumer vertex = buffers.getBuffer(RenderType.entityCutoutNoCull(texture));
         pose.pushPose();
         getParentModel().head.translateAndRotate(pose);
-        ears.render(pose, vertex, light, OverlayTexture.NO_OVERLAY);
+        headDecor.render(pose, vertex, light, OverlayTexture.NO_OVERLAY);
         pose.popPose();
         pose.pushPose();
         getParentModel().body.translateAndRotate(pose);
         tail.yRot = (float) Math.sin((entity.tickCount + partialTick) * 0.12F) * 0.35F;
         tail.render(pose, vertex, light, OverlayTexture.NO_OVERLAY);
+        wings.zRot = (float) Math.sin((entity.tickCount + partialTick) * 0.08F) * 0.10F;
+        wings.render(pose, vertex, light, OverlayTexture.NO_OVERLAY);
         pose.popPose();
     }
 }

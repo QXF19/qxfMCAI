@@ -90,11 +90,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v4：龙龙会独立执行真实任务、汇报发现并提出建议。按 M 打开控制中心。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v5：任务先执行、聊天后返回；工具位于隐藏装备仓。按 M 打开控制中心。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v4 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("v5 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -119,7 +119,7 @@ public final class McAiCommands {
         AiCompanionEntity companion = CompanionManager.find(player);
         if (companion == null) companion = CompanionManager.summon(player);
         companion.enqueueAction(new AgentAction(type, "", count, "", ""));
-        source.sendSuccess(() -> Component.literal("[龙龙] 任务已加入队列：" + type + " × " + count), false);
+        source.sendSuccess(() -> Component.literal("[龙龙] 任务已立即启动或进入连续队列：" + type + " × " + count), false);
         return 1;
     }
 
@@ -229,6 +229,7 @@ public final class McAiCommands {
             + "，已完成任务=" + companion.getCompletedTasks()), false);
         source.sendSuccess(() -> Component.literal("YSM=" + (companion.getYsmModel().isBlank() ? "未选择" : companion.getYsmModel()
             + "/" + companion.getYsmTexture()) + "，API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
+        source.sendSuccess(() -> Component.literal("隐藏装备仓=已启用（工具/武器/箭不占27格物资背包）"), false);
         return 1;
     }
 

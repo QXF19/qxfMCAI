@@ -2,6 +2,7 @@ package cn.qxf.mcai;
 
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
+import cn.qxf.mcai.compat.YsmAddonBridge;
 import cn.qxf.mcai.entity.ModEntities;
 import cn.qxf.mcai.network.ModNetwork;
 import net.minecraftforge.common.MinecraftForge;
@@ -26,17 +27,16 @@ public final class QxfMcAi {
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
         McAiConfig.ensureSkinDirectory();
-        LOGGER.info("qxfMCAI v4.0.0 已加载：龙龙独立任务执行器已启用");
+        LOGGER.info("qxfMCAI v5.0.0 已加载：等待 Forge 完成服务端配置绑定");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
             ModNetwork.register();
             AiService.init();
-            McAiConfig.ALLOW_FULL_COMMANDS.set(true);
-            McAiConfig.SYSTEM_PROMPT.set(McAiConfig.V4_SYSTEM_PROMPT);
-            McAiConfig.SPEC.save();
-            LOGGER.info("龙龙最高命令权限已启用（服务器 OP4 命令源）");
+            YsmAddonBridge.installDefaultModel();
+            // 不在 common setup 写 ForgeConfigSpec：SERVER 配置此时可能尚未绑定 Config 对象。
+            LOGGER.info("龙龙任务引擎与 OP4 命令源已启用；未在启动阶段写入 Forge 配置");
         });
     }
 }
