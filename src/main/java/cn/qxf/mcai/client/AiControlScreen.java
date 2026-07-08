@@ -21,8 +21,6 @@ public final class AiControlScreen extends Screen {
     private boolean allowCommands = true;
     private boolean clearKey;
     private boolean showKey;
-    private EditBox ysmModelBox;
-    private EditBox ysmTextureBox;
     private EditBox baseUrlBox;
     private EditBox modelBox;
     private EditBox apiKeyBox;
@@ -38,7 +36,7 @@ public final class AiControlScreen extends Screen {
     private int panelWidth;
     private int panelHeight;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v6.0")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v7.0")); }
 
     @Override
     protected void init() {
@@ -52,7 +50,7 @@ public final class AiControlScreen extends Screen {
         int tabWidth = (contentWidth - gap * 3) / 4;
         addTab("伙伴", Page.COMPANION, left, tabWidth);
         addTab("任务", Page.TASKS, left + tabWidth + gap, tabWidth);
-        addTab("外观", Page.APPEARANCE, left + (tabWidth + gap) * 2, tabWidth);
+        addTab("互动", Page.APPEARANCE, left + (tabWidth + gap) * 2, tabWidth);
         addTab("API/权限", Page.API, left + (tabWidth + gap) * 3, tabWidth);
         int half = (contentWidth - 5) / 2;
         switch (page) {
@@ -96,29 +94,12 @@ public final class AiControlScreen extends Screen {
 
     private void initAppearancePage(int left, int top, int width, int half) {
         int y = top;
-        ysmModelBox = new EditBox(font, left, y, width, 20, Component.literal("YSM 模型ID"));
-        ysmModelBox.setMaxLength(96);
-        ysmModelBox.setValue("001");
-        addRenderableWidget(ysmModelBox);
-        y += 34;
-        ysmTextureBox = new EditBox(font, left, y, width, 20, Component.literal("YSM 材质ID；-为默认"));
-        ysmTextureBox.setMaxLength(96);
-        ysmTextureBox.setValue("bailong");
-        addRenderableWidget(ysmTextureBox);
-        y += 26;
-        addRenderableWidget(Button.builder(Component.literal("设置龙龙附属模型（不影响玩家）"), b -> {
-            String model = ysmModelBox.getValue().trim();
-            String texture = ysmTextureBox.getValue().trim();
-            if (!model.matches("[A-Za-z0-9._-]+") || !texture.matches("[A-Za-z0-9._-]+")) {
-                localStatus = Component.literal("YSM ID 只能包含字母、数字、点、_、-");
-                return;
-            }
-            command("mcai ysm " + model + " " + texture);
-        }).bounds(left, y, width, 20).build());
-        y += 29;
-        addPair(left, y, half, "开心互动", "mcai task emote 1", "查看当前外观", "mcai status"); y += 29;
-        addPair(left, y, half, "好感度/棋类状态", "mcai status", "饰品与综合界面", "mcai inventory"); y += 29;
-        addRenderableWidget(Button.builder(Component.literal("白龙模型由 YSM + 车万女仆实体直接渲染"), b -> {})
+        addPair(left, y, half, "开心互动", "mcai task emote 1", "查看关系状态", "mcai status"); y += 25;
+        addPair(left, y, half, "赠送主手饰品", "mcai accessory", "骑乘龙龙", "mcai ride"); y += 25;
+        addPair(left, y, half, "开始五子棋", "mcai gomoku start", "棋局状态", "mcai status"); y += 25;
+        addPair(left, y, half, "同意组建家庭", "mcai family accept", "撤回家庭同意", "mcai family decline"); y += 25;
+        addPair(left, y, half, "迎接小龙宝宝", "mcai family child", "打开物资背包", "mcai inventory"); y += 29;
+        addRenderableWidget(Button.builder(Component.literal("单实体原生3D：无女仆依赖、无传送同步卡顿"), b -> {})
             .bounds(left, y, width, 20).build()).active = false;
     }
 
@@ -209,9 +190,6 @@ public final class AiControlScreen extends Screen {
             graphics.drawString(font, "API基础地址", baseUrlBox.getX(), baseUrlBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "模型名", modelBox.getX(), modelBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "API密钥（留空保留旧值）", apiKeyBox.getX(), apiKeyBox.getY() - 9, 0xC8C8C8, false);
-        } else if (page == Page.APPEARANCE && ysmModelBox != null) {
-            graphics.drawString(font, "YSM 模型 ID", ysmModelBox.getX(), ysmModelBox.getY() - 9, 0xC8C8C8, false);
-            graphics.drawString(font, "YSM 材质 ID", ysmTextureBox.getX(), ysmTextureBox.getY() - 9, 0xC8C8C8, false);
         }
         graphics.drawCenteredString(font, localStatus, width / 2, panelTop + panelHeight - 13, 0xB8E8FF);
         super.render(graphics, mouseX, mouseY, partialTick);

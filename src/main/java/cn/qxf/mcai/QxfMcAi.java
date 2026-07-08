@@ -2,7 +2,6 @@ package cn.qxf.mcai;
 
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
-import cn.qxf.mcai.compat.YsmAddonBridge;
 import cn.qxf.mcai.entity.ModEntities;
 import cn.qxf.mcai.network.ModNetwork;
 import net.minecraftforge.common.MinecraftForge;
@@ -26,15 +25,13 @@ public final class QxfMcAi {
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
-        McAiConfig.ensureSkinDirectory();
-        LOGGER.info("qxfMCAI v6.0.0 已加载：YSM 女仆实体桥与轻量任务核心就绪");
+        LOGGER.info("qxfMCAI v7.0.0 已加载：单实体原生3D龙龙与轻量任务核心就绪");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
             ModNetwork.register();
             AiService.init();
-            YsmAddonBridge.installDefaultModel();
             // 不在 common setup 写 ForgeConfigSpec：SERVER 配置此时可能尚未绑定 Config 对象。
             LOGGER.info("龙龙任务引擎与 OP4 命令源已启用；未在启动阶段写入 Forge 配置");
         });

@@ -4,7 +4,6 @@ import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
-import cn.qxf.mcai.compat.MaidVisualBridge;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -14,9 +13,6 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import java.nio.file.Files;
-import java.nio.charset.StandardCharsets;
-import java.io.InputStream;
 
 public final class McAiCommands {
     private McAiCommands() {}
@@ -49,6 +45,18 @@ public final class McAiCommands {
             .then(Commands.literal("permit")
                 .then(Commands.literal("teleport").executes(ctx -> permitTeleport(ctx.getSource()))))
             .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
+            .then(Commands.literal("ride").executes(ctx -> ride(ctx.getSource())))
+            .then(Commands.literal("accessory").executes(ctx -> accessory(ctx.getSource())))
+            .then(Commands.literal("gomoku")
+                .then(Commands.literal("start").executes(ctx -> gomokuStart(ctx.getSource())))
+                .then(Commands.argument("x", IntegerArgumentType.integer(0, 8))
+                    .then(Commands.argument("y", IntegerArgumentType.integer(0, 8))
+                        .executes(ctx -> gomoku(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "x"),
+                            IntegerArgumentType.getInteger(ctx, "y"))))))
+            .then(Commands.literal("family")
+                .then(Commands.literal("accept").executes(ctx -> family(ctx.getSource(), "accept")))
+                .then(Commands.literal("decline").executes(ctx -> family(ctx.getSource(), "decline")))
+                .then(Commands.literal("child").executes(ctx -> family(ctx.getSource(), "child"))))
             .then(Commands.literal("ask")
                 .then(Commands.argument("内容", StringArgumentType.greedyString())
                     .executes(ctx -> ask(ctx.getSource(), StringArgumentType.getString(ctx, "内容")))))
@@ -57,11 +65,6 @@ public final class McAiCommands {
                     .then(Commands.argument("数量", IntegerArgumentType.integer(1, 256))
                         .executes(ctx -> action(ctx.getSource(), StringArgumentType.getString(ctx, "动作"),
                             IntegerArgumentType.getInteger(ctx, "数量"))))))
-            .then(Commands.literal("ysm")
-                .then(Commands.argument("模型ID", StringArgumentType.word())
-                    .then(Commands.argument("材质ID", StringArgumentType.word())
-                        .executes(ctx -> ysm(ctx.getSource(), StringArgumentType.getString(ctx, "模型ID"),
-                            StringArgumentType.getString(ctx, "材质ID"))))))
             .then(Commands.literal("invincible").requires(source -> source.hasPermission(4))
                 .then(Commands.argument("开启", BoolArgumentType.bool())
                     .executes(ctx -> invincible(ctx.getSource(), BoolArgumentType.getBool(ctx, "开启")))))
@@ -88,11 +91,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v6：任务先执行、聊天后返回；工具位于隐藏装备仓。按 M 打开控制中心。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v7：单实体平滑动作、原生3D渲染；任务先执行、聊天后返回。按 M 打开控制中心。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v6 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("v7 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -138,6 +141,52 @@ public final class McAiCommands {
         return 1;
     }
 
+    private static int ride(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        AiCompanionEntity companion = getOrSummon(source);
+        boolean result = player.startRiding(companion, true);
+        source.sendSuccess(() -> Component.literal(result ? "已骑上龙龙；潜行键下马。" : "现在无法骑乘。"), false);
+        return result ? 1 : 0;
+    }
+
+    private static int accessory(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        AiCompanionEntity companion = getOrSummon(source);
+        boolean result = companion.equipAccessory(player);
+        source.sendSuccess(() -> Component.literal(result ? "已把手中物品作为饰品送给龙龙。" : "请主手拿着饰品；最多四件。"), false);
+        return result ? 1 : 0;
+    }
+
+    private static int gomokuStart(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        getOrSummon(source).startGomoku();
+        source.sendSuccess(() -> Component.literal("五子棋已开局：/mcai gomoku 下 x y（0到8）。"), false);
+        return 1;
+    }
+
+    private static int gomoku(CommandSourceStack source, int x, int y) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        String result = getOrSummon(source).playGomoku(x, y);
+        source.sendSuccess(() -> Component.literal("[龙龙] " + result), false);
+        return 1;
+    }
+
+    private static int family(CommandSourceStack source, String action) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        AiCompanionEntity companion = getOrSummon(source);
+        if ("accept".equals(action)) {
+            companion.acceptFamily();
+            source.sendSuccess(() -> Component.literal("已明确同意组建家庭；任何时候都可用 decline 撤回。"), false);
+            return 1;
+        }
+        if ("decline".equals(action)) {
+            companion.declineFamily();
+            source.sendSuccess(() -> Component.literal("已撤回家庭同意，龙龙会尊重决定。"), false);
+            return 1;
+        }
+        boolean created = companion.createFamilyChild(player);
+        source.sendSuccess(() -> Component.literal(created ? "家庭迎来了一个小龙宝宝。" : "需要好感度80、明确同意，并等待一个游戏日。"), false);
+        return created ? 1 : 0;
+    }
+
     private static int permitTeleport(CommandSourceStack source)
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
@@ -153,26 +202,6 @@ public final class McAiCommands {
     private static int ask(CommandSourceStack source, String text) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiService.ask(source.getPlayerOrException(), text, false);
         return 1;
-    }
-
-    private static int ysm(CommandSourceStack source, String modelId, String textureId)
-        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        AiCompanionEntity companion = getOrSummon(source);
-        java.nio.file.Path file = McAiConfig.ysmModelDirectory().resolve(modelId + ".ysm");
-        if (Files.isRegularFile(file)) {
-            try (InputStream input = Files.newInputStream(file)) {
-                byte[] header = input.readNBytes(16);
-                String prefix = new String(header, 0, Math.min(header.length, 16), StandardCharsets.UTF_8);
-                if (prefix.contains("YSGP")) {
-                    companion.setYsmSelection(modelId, textureId);
-                    source.sendSuccess(() -> Component.literal(modelId + ".ysm 已绑定到龙龙的车万女仆实体，不会改变玩家皮肤。"), false);
-                    return 1;
-                }
-            } catch (java.io.IOException ignored) { }
-        }
-        companion.setYsmSelection(modelId, textureId);
-        source.sendFailure(Component.literal("未在龙龙附属目录找到该 YSM 模型包，请检查模型 ID。"));
-        return 0;
     }
 
     private static int invincible(CommandSourceStack source, boolean enabled)
@@ -214,12 +243,12 @@ public final class McAiCommands {
             + companion.getDragonExperience() + "），模式=" + companion.getMode().chinese + "，活动=" + companion.getActivity()
             + "，习惯=" + companion.getHabit() + "，想法=" + companion.getThought()
             + "，已完成任务=" + companion.getCompletedTasks()), false);
-        source.sendSuccess(() -> Component.literal("YSM=" + (companion.getYsmModel().isBlank() ? "未选择" : companion.getYsmModel()
-            + "/" + companion.getYsmTexture()) + "，API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
+        source.sendSuccess(() -> Component.literal("原生3D=已启用（无外部渲染依赖），API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
         source.sendSuccess(() -> Component.literal("隐藏装备仓=已启用（工具/武器/箭不占27格物资背包）"), false);
-        source.sendSuccess(() -> Component.literal("好感度=" + MaidVisualBridge.favorability(companion)
-            + "，五子棋胜场=" + MaidVisualBridge.gomokuWins(companion)
-            + "，饰品/坐骑/棋类=车万女仆轻量接口已启用"), false);
+        source.sendSuccess(() -> Component.literal("好感度=" + companion.getFavorability()
+            + "，饰品=" + companion.accessorySummary() + "，五子棋=" + companion.getGomokuWins() + "胜/"
+            + companion.getGomokuLosses() + "负，家庭孩子=" + companion.getChildrenCount()
+            + "，家庭同意=" + (companion.hasFamilyConsent() ? "是" : "否")), false);
         return 1;
     }
 

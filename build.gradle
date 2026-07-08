@@ -21,8 +21,6 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'info'
-            property 'mixin.env.remapRefMap', 'true'
-            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
             mods {
                 qxfmcai { source sourceSets.main }
             }
@@ -39,17 +37,13 @@ repositories {
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    implementation fg.deobf("maven.modrinth:R0bDWFAW:g1SKoGQJ")
-    if (!project.hasProperty('qxfNoYsm')) {
-        runtimeOnly fg.deobf("maven.modrinth:86xjpqqS:Zqooxsd2")
-    }
 }
 
 tasks.named('processResources', ProcessResources).configure {
+    exclude 'assets/qxfmcai/ysm_models/**'
     def replaceProperties = [minecraft_version: minecraft_version, forge_version: forge_version,
                              mod_id: mod_id, mod_name: mod_name, mod_version: mod_version,
-                             mod_authors: mod_authors,
-                             ysm_mandatory: !project.hasProperty('qxfNoYsm')]
+                             mod_authors: mod_authors]
     inputs.properties replaceProperties
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]

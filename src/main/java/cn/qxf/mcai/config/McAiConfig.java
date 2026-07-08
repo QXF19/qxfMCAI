@@ -1,12 +1,6 @@
 package cn.qxf.mcai.config;
 
 import net.minecraftforge.common.ForgeConfigSpec;
-import net.minecraftforge.fml.loading.FMLPaths;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.net.URI;
 import java.util.Locale;
 
@@ -68,7 +62,7 @@ public final class McAiConfig {
         SYSTEM_PROMPT = b.define("systemPrompt", V5_SYSTEM_PROMPT);
         AUTONOMY_ENABLED = b.comment("龙龙是否会在空闲时根据夜晚、生命、物资和长期目标自主行动")
             .define("autonomyEnabled", true);
-        ALLOW_FULL_COMMANDS = b.comment("v6兼容字段：龙龙始终以服务器OP4命令源执行明确的命令任务")
+        ALLOW_FULL_COMMANDS = b.comment("v7兼容字段：龙龙始终以服务器OP4命令源执行明确的命令任务")
             .define("allowFullCommands", true);
         BUILDING_ENABLED = b.comment("是否允许龙龙放置方块建造基础设施")
             .define("buildingEnabled", true);
@@ -183,7 +177,7 @@ public final class McAiConfig {
         SPEC.save();
     }
 
-    /** v6 的核心动作契约不依赖旧世界中遗留的 v2/v3 提示词。 */
+    /** v7 的核心动作契约不依赖旧世界中遗留的 v2/v3 提示词。 */
     public static String systemPrompt() {
         return V5_SYSTEM_PROMPT;
     }
@@ -208,25 +202,4 @@ public final class McAiConfig {
         return text;
     }
 
-    public static Path ysmModelDirectory() {
-        return FMLPaths.CONFIGDIR.get().resolve("qxfmcai").resolve("ysm_models");
-    }
-
-    public static void ensureSkinDirectory() {
-        try {
-            Files.createDirectories(ysmModelDirectory());
-            Path defaultModel = ysmModelDirectory().resolve("001.ysm");
-            if (Files.notExists(defaultModel)) {
-                try (var input = McAiConfig.class.getResourceAsStream("/assets/qxfmcai/ysm_models/001.ysm")) {
-                    if (input != null) Files.copy(input, defaultModel, StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-            Path guide = ysmModelDirectory().resolve("README.txt");
-            if (Files.notExists(guide)) Files.writeString(guide,
-                "这里是龙龙专属的附属模型包目录，不会替换或修改玩家皮肤。\n" +
-                "001.ysm（白龙）为默认附属资源；它是 YSGP 加密包，只能由兼容的 YSM 运行时读取。\n" +
-                "v6 将模型绑定到车万女仆实体，由 YSM 直接渲染；不会影响玩家皮肤。\n");
-        }
-        catch (IOException ignored) {}
-    }
 }
