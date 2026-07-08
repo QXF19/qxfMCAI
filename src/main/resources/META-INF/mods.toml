@@ -11,8 +11,8 @@ authors="${mod_authors}"
 displayURL="https://github.com/QXF19/qxfMCAI"
 description='''
 全中文 Minecraft Forge 智能伙伴“龙龙”。支持 OpenAI、DeepSeek 与自定义兼容模型，
-拥有持久记忆、独立背包、20+实际动作、武器与工具、洞穴式挖矿、建造、聊天气泡、
-日系 furry 外观、龙龙专属 YSM 附属资源，以及受 OP 4 保护的无敌与全命令授权。
+拥有实际挖矿、建造、战斗、储物和命令执行能力。v6 使用车万女仆实体承载 YSM 白龙 3D
+模型，并轻量接入好感度、饰品、坐骑与棋类；不会替换或修改玩家皮肤。
 '''
 
 [[dependencies.${mod_id}]]
@@ -26,6 +26,13 @@ side="BOTH"
 modId="yes_steve_model"
 mandatory=${ysm_mandatory}
 versionRange="[2.6.5,)"
+ordering="AFTER"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="touhou_little_maid"
+mandatory=true
+versionRange="[1.5.3,)"
 ordering="AFTER"
 side="BOTH"
 

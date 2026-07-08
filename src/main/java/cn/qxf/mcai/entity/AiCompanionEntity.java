@@ -3,6 +3,7 @@ package cn.qxf.mcai.entity;
 import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.config.McAiConfig;
+import cn.qxf.mcai.compat.MaidVisualBridge;
 import cn.qxf.mcai.server.CompanionManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -90,8 +91,6 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DATA_INVINCIBLE =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.BOOLEAN);
-    private static final EntityDataAccessor<String> DATA_SKIN =
-        SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> DATA_BUBBLE =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> DATA_EMOTION =
@@ -150,7 +149,6 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         super.defineSynchedData();
         entityData.define(DATA_MODE, Mode.PATROL.id);
         entityData.define(DATA_INVINCIBLE, true);
-        entityData.define(DATA_SKIN, "white_dragon.png");
         entityData.define(DATA_BUBBLE, "");
         entityData.define(DATA_EMOTION, "curious");
         entityData.define(DATA_ACTIVITY, "正在观察世界");
@@ -191,6 +189,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public void tick() {
         super.tick();
         if (level().isClientSide) return;
+        MaidVisualBridge.tick(this);
         if (tickCount % 20 == 0) CompanionManager.register(this);
         if (tickCount % 40 == 1) {
             ensureOwnEquipment();
@@ -388,7 +387,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         ensureOwnEquipment();
         grantStarterKit();
         if (getMainHandItem().isEmpty()) equipBestWeapon();
-        remember("v5初始化：我习惯做一名" + habit + "，最高级工具放在自己的隐藏装备空间中");
+        remember("v6初始化：我习惯做一名" + habit + "，最高级工具放在自己的隐藏装备空间中");
     }
 
     public void setHomePosition(BlockPos pos) { homePosition = pos == null ? blockPosition() : pos.immutable(); }
@@ -1014,6 +1013,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     public void openInventory(ServerPlayer player) {
+        if (MaidVisualBridge.openMaidMenu(this, player)) return;
         player.openMenu(new SimpleMenuProvider(
             (id, playerInventory, ignored) -> ChestMenu.threeRows(id, playerInventory, inventory),
             Component.literal("龙龙的独立背包 · 27格")));
@@ -1112,6 +1112,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         entityData.set(DATA_BUBBLE, clean);
         entityData.set(DATA_EMOTION, sanitize(emotion, 16, "curious"));
         bubbleTicks = 20 * Math.max(4, Math.min(12, clean.length() / 8 + 3));
+        MaidVisualBridge.speak(this, clean);
     }
 
     public void emote(String emotion, String message) {
@@ -1174,6 +1175,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public void setYsmSelection(String model, String texture) {
         entityData.set(DATA_YSM_MODEL, sanitize(model, 96, ""));
         entityData.set(DATA_YSM_TEXTURE, sanitize(texture, 96, "-"));
+        if (!level().isClientSide) MaidVisualBridge.setModel(this, model, texture);
     }
     public String getYsmModel() { return entityData.get(DATA_YSM_MODEL); }
     public String getYsmTexture() { return entityData.get(DATA_YSM_TEXTURE); }
@@ -1212,17 +1214,11 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
     public boolean isCompanionInvincible() { return entityData.get(DATA_INVINCIBLE); }
     public void setCompanionInvincible(boolean value) { entityData.set(DATA_INVINCIBLE, value); }
-    public String getSkinName() { return entityData.get(DATA_SKIN); }
-    public void setSkinName(String fileName) {
-        if (fileName != null && fileName.matches("[A-Za-z0-9._-]+\\.png")) entityData.set(DATA_SKIN, fileName);
-    }
-
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         tag.putInt("McAiMode", getMode().id);
         tag.putBoolean("McAiInvincible", isCompanionInvincible());
-        tag.putString("McAiSkin", getSkinName());
         tag.putString("DragonBubble", getBubble());
         tag.putString("DragonEmotion", getEmotion());
         tag.putString("DragonActivity", getActivity());
@@ -1252,8 +1248,6 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         Mode savedMode = Mode.fromId(tag.getInt("McAiMode"));
         setMode(dataVersion < 4 && savedMode == Mode.FOLLOW ? Mode.PATROL : savedMode);
         setCompanionInvincible(dataVersion < 4 || tag.getBoolean("McAiInvincible"));
-        if (dataVersion < 4) setSkinName("white_dragon.png");
-        else if (tag.contains("McAiSkin")) setSkinName(tag.getString("McAiSkin"));
         entityData.set(DATA_BUBBLE, tag.getString("DragonBubble"));
         entityData.set(DATA_EMOTION, sanitize(tag.getString("DragonEmotion"), 16, "curious"));
         entityData.set(DATA_ACTIVITY, sanitize(tag.getString("DragonActivity"), 80, "空闲"));

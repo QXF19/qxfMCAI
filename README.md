@@ -1,15 +1,15 @@
-# qxfMCAI v5
+# qxfMCAI v6
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.4.10%2B-DFA86A)](https://files.minecraftforge.net/net/minecraftforge/forge/index_1.20.1.html)
-[![Version](https://img.shields.io/badge/version-5.0.0-ff77aa)](https://github.com/QXF19/qxfMCAI/releases)
+[![Version](https://img.shields.io/badge/version-6.0.0-ff77aa)](https://github.com/QXF19/qxfMCAI/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 面向 **Minecraft Java 1.20.1 / Forge** 的全中文智能生存伙伴模组。伙伴现名为 **龙龙（ロンロン）**：他会记住经历、形成想法、安排任务，并在世界里真正移动、采集、使用工具、战斗和建造。
 
-> 模组模拟“独立人格与长期记忆”，并不宣称模型拥有真实意识。v5 按项目要求为龙龙固定提供 OP4 命令源，仅建议在私人且已备份的世界使用。
+> 模组模拟“独立人格与长期记忆”，并不宣称模型拥有真实意识。v6 按项目要求为龙龙固定提供 OP4 命令源，仅建议在私人且已备份的世界使用。
 
-## v5 核心功能
+## v6 核心功能
 
 - 四页中文控制菜单：伙伴、任务、外观、API/权限
 - OpenAI、DeepSeek、自定义 OpenAI 兼容接口；默认 DeepSeek 模型 `deepseek-v4-pro`
@@ -20,8 +20,9 @@
 - 向下搜索矿脉，无法直接寻路时会开凿双格高通道逐步深入地下
 - 使用真实工具与方块掉落规则；没有镐子或材料时会停止并说明原因
 - 使用背包里的真实方块建造庇护所、小屋、桥梁和照明
-- 头顶聊天气泡、当前动作标签、日系颜文字表情、龙耳和动态尾巴
-- PNG 外观热切换，以及必需的 YSM 2.6.5 附属 Mod 与独立模型包目录
+- 车万女仆实体承载 YSM 2.6.5 白龙 3D 模型，玩家皮肤保持完全独立
+- 头顶聊天气泡、当前动作、日系颜文字与轻量 Furry 气质
+- 轻量接入好感度、饰品栏、骑乘和棋类记录，不复制参考模组的冗余系统
 - 下界合金工具、武器和箭存放在龙龙的18格隐藏装备仓，不占玩家可见的27格物资背包
 - 任务意图先由服务端立即执行，API 只补充聊天和复杂规划；网络失败也不会吞掉基础任务
 - 默认自主巡逻而非强制跟随；会形成习惯、主动提出建议、完成后汇报
@@ -38,9 +39,9 @@
 ## 安装
 
 1. 安装 Minecraft 1.20.1 与 Forge 47.4.10 或更高版本。
-2. 安装必需附属模组 **Yes Steve Model 2.6.5 Forge 1.20.1**。
-3. 从 [Releases](https://github.com/QXF19/qxfMCAI/releases) 下载 `qxfmcai-5.0.0.jar`。
-4. 把两个 jar 同时放入客户端和服务端的 `mods` 文件夹。
+2. 安装 **Yes Steve Model 2.6.5** 与 **Touhou Little Maid 1.5.3**（均为 Forge 1.20.1）。
+3. 从 [Releases](https://github.com/QXF19/qxfMCAI/releases) 下载 `qxfmcai-6.0.0.jar`。
+4. 把三个 jar 同时放入客户端和服务端的 `mods` 文件夹。
 5. 进入世界后按 **M** 打开菜单，使用 `/mcai summon` 召唤龙龙。
 
 ## 对话和真正执行任务
@@ -67,25 +68,19 @@
 
 - 挖矿会优先搜索当前位置以下、配置深度范围内的 Forge `ores` 标签方块。
 - 无路可走时，龙龙会朝目标开凿两格高的下降通道。
-- 龙龙会切换正确镐子并真实消耗耐久；v5 的最高权限任务不再受 `mobGriefing` 阻断。
+- 龙龙会切换正确镐子并真实消耗耐久；v6 的最高权限任务不再受 `mobGriefing` 阻断。
 - 庇护所、小屋和桥梁按蓝图逐块放置，消耗背包里的真实材料。
 - 管理员可在 `qxfmcai-server.toml` 关闭挖矿、建造或自主行为。
 
 ## 龙龙专属 YSM 附属资源与外观
 
-v5 内置用户提供的 `001.ysm`（白龙）原始加密包，并固定设为龙龙默认附属资源。启动时会原样安装到 YSM 的 `custom/001.ysm`，同时备份在：
+v6 内置用户提供的 `001.ysm`（白龙）原始加密包，并固定设为龙龙默认附属资源。启动时会原样安装到 YSM 的 `custom/001.ysm`，同时备份在：
 
 ```text
 config/qxfmcai/ysm_models/
 ```
 
-该文件的 YSGP 加密内容由 YSM 2.6.5 运行时读取，YSM 是 v5 的必需附属模组。qxfMCAI 不选择、不替换也不修改玩家皮肤。若 YSM 无法把加密包绑定到自定义实体，龙龙会继续显示内置的完整 3D 白龙头部、角、口鼻、耳、翅膀和动态尾巴；回退皮肤使用透明外层和蓝金鳞纹，不再出现纯白模型。第三方模型许可见 [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md)。
-
-普通 PNG 皮肤放在：
-
-```text
-config/qxfmcai/skins/
-```
+该文件的 YSGP 加密内容由 YSM 2.6.5 运行时读取。v6 不再把玩家方块模型伪装成 3D，而是把白龙模型绑定到受 YSM 官方兼容的车万女仆实体；qxfMCAI 不选择、不替换也不修改玩家皮肤。第三方模型许可见 [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md)。
 
 ## API 与权限
 
@@ -95,7 +90,7 @@ config/qxfmcai/skins/
 - DeepSeek：`https://api.deepseek.com` / `deepseek-v4-pro`
 - 自定义：`http://127.0.0.1:11434/v1` / `qwen2.5:7b`
 
-v5 的最高命令权限固定开启；中文“执行命令 …”会在等待 API 回复前立即提交到 OP4 命令源。请只在私人、已备份的世界使用。
+v6 的最高命令权限固定开启；中文“执行命令 …”会在等待 API 回复前立即提交到 OP4 命令源。请只在私人、已备份的世界使用。
 
 ## 常用命令
 
@@ -108,7 +103,6 @@ v5 的最高命令权限固定开启；中文“执行命令 …”会在等待 
 - `/mcai equip weapon|pickaxe`
 - `/mcai task <动作> <数量>`
 - `/mcai ask <内容>`
-- `/mcai skin <文件.png>`
 - `/mcai ysm <模型ID> <材质ID>`
 - `/mcai status`
 - `/mcai invincible <true|false>`：仅 OP4

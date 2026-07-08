@@ -4,6 +4,7 @@ import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
+import cn.qxf.mcai.compat.MaidVisualBridge;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -56,9 +57,6 @@ public final class McAiCommands {
                     .then(Commands.argument("数量", IntegerArgumentType.integer(1, 256))
                         .executes(ctx -> action(ctx.getSource(), StringArgumentType.getString(ctx, "动作"),
                             IntegerArgumentType.getInteger(ctx, "数量"))))))
-            .then(Commands.literal("skin")
-                .then(Commands.argument("PNG文件名", StringArgumentType.word())
-                    .executes(ctx -> skin(ctx.getSource(), StringArgumentType.getString(ctx, "PNG文件名")))))
             .then(Commands.literal("ysm")
                 .then(Commands.argument("模型ID", StringArgumentType.word())
                     .then(Commands.argument("材质ID", StringArgumentType.word())
@@ -90,11 +88,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v5：任务先执行、聊天后返回；工具位于隐藏装备仓。按 M 打开控制中心。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v6：任务先执行、聊天后返回；工具位于隐藏装备仓。按 M 打开控制中心。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v5 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("v6 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -157,17 +155,6 @@ public final class McAiCommands {
         return 1;
     }
 
-    private static int skin(CommandSourceStack source, String fileName) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        if (!fileName.matches("[A-Za-z0-9._-]+\\.png")) {
-            source.sendFailure(Component.literal("皮肤文件名必须以 .png 结尾，且只能包含字母、数字、点、下划线和短横线。"));
-            return 0;
-        }
-        AiCompanionEntity companion = getOrSummon(source);
-        companion.setSkinName(fileName);
-        source.sendSuccess(() -> Component.literal("龙龙的 PNG 皮肤已切换为 " + fileName), false);
-        return 1;
-    }
-
     private static int ysm(CommandSourceStack source, String modelId, String textureId)
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
@@ -178,13 +165,13 @@ public final class McAiCommands {
                 String prefix = new String(header, 0, Math.min(header.length, 16), StandardCharsets.UTF_8);
                 if (prefix.contains("YSGP")) {
                     companion.setYsmSelection(modelId, textureId);
-                    source.sendSuccess(() -> Component.literal(modelId + ".ysm 已设为龙龙专属附属资源，不会改变玩家皮肤。当前文件是 YSGP 加密包；若运行时不能绑定自定义实体，将自动显示内置白龙外观。"), false);
+                    source.sendSuccess(() -> Component.literal(modelId + ".ysm 已绑定到龙龙的车万女仆实体，不会改变玩家皮肤。"), false);
                     return 1;
                 }
             } catch (java.io.IOException ignored) { }
         }
         companion.setYsmSelection(modelId, textureId);
-        source.sendFailure(Component.literal("未找到可直接读取的未加密模型源；龙龙继续使用内置 furry/PNG 外观。"));
+        source.sendFailure(Component.literal("未在龙龙附属目录找到该 YSM 模型包，请检查模型 ID。"));
         return 0;
     }
 
@@ -230,6 +217,9 @@ public final class McAiCommands {
         source.sendSuccess(() -> Component.literal("YSM=" + (companion.getYsmModel().isBlank() ? "未选择" : companion.getYsmModel()
             + "/" + companion.getYsmTexture()) + "，API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
         source.sendSuccess(() -> Component.literal("隐藏装备仓=已启用（工具/武器/箭不占27格物资背包）"), false);
+        source.sendSuccess(() -> Component.literal("好感度=" + MaidVisualBridge.favorability(companion)
+            + "，五子棋胜场=" + MaidVisualBridge.gomokuWins(companion)
+            + "，饰品/坐骑/棋类=车万女仆轻量接口已启用"), false);
         return 1;
     }
 

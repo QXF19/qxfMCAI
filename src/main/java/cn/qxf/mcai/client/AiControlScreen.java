@@ -21,7 +21,6 @@ public final class AiControlScreen extends Screen {
     private boolean allowCommands = true;
     private boolean clearKey;
     private boolean showKey;
-    private EditBox skinBox;
     private EditBox ysmModelBox;
     private EditBox ysmTextureBox;
     private EditBox baseUrlBox;
@@ -39,7 +38,7 @@ public final class AiControlScreen extends Screen {
     private int panelWidth;
     private int panelHeight;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v5.0")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v6.0")); }
 
     @Override
     protected void init() {
@@ -97,16 +96,6 @@ public final class AiControlScreen extends Screen {
 
     private void initAppearancePage(int left, int top, int width, int half) {
         int y = top;
-        skinBox = new EditBox(font, left, y, width - 78, 20, Component.literal("PNG皮肤文件名"));
-        skinBox.setMaxLength(128);
-        skinBox.setValue("white_dragon.png");
-        addRenderableWidget(skinBox);
-        addRenderableWidget(Button.builder(Component.literal("PNG换肤"), b -> {
-            SkinLoader.clear();
-            command("mcai skin " + skinBox.getValue().trim());
-            localStatus = Component.literal("已提交 PNG 换肤");
-        }).bounds(left + width - 73, y, 73, 20).build());
-        y += 34;
         ysmModelBox = new EditBox(font, left, y, width, 20, Component.literal("YSM 模型ID"));
         ysmModelBox.setMaxLength(96);
         ysmModelBox.setValue("001");
@@ -114,7 +103,7 @@ public final class AiControlScreen extends Screen {
         y += 34;
         ysmTextureBox = new EditBox(font, left, y, width, 20, Component.literal("YSM 材质ID；-为默认"));
         ysmTextureBox.setMaxLength(96);
-        ysmTextureBox.setValue("-");
+        ysmTextureBox.setValue("bailong");
         addRenderableWidget(ysmTextureBox);
         y += 26;
         addRenderableWidget(Button.builder(Component.literal("设置龙龙附属模型（不影响玩家）"), b -> {
@@ -128,7 +117,8 @@ public final class AiControlScreen extends Screen {
         }).bounds(left, y, width, 20).build());
         y += 29;
         addPair(left, y, half, "开心互动", "mcai task emote 1", "查看当前外观", "mcai status"); y += 29;
-        addRenderableWidget(Button.builder(Component.literal("加密包由附属运行时读取；失败自动使用白龙回退"), b -> {})
+        addPair(left, y, half, "好感度/棋类状态", "mcai status", "饰品与综合界面", "mcai inventory"); y += 29;
+        addRenderableWidget(Button.builder(Component.literal("白龙模型由 YSM + 车万女仆实体直接渲染"), b -> {})
             .bounds(left, y, width, 20).build()).active = false;
     }
 
@@ -220,7 +210,6 @@ public final class AiControlScreen extends Screen {
             graphics.drawString(font, "模型名", modelBox.getX(), modelBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "API密钥（留空保留旧值）", apiKeyBox.getX(), apiKeyBox.getY() - 9, 0xC8C8C8, false);
         } else if (page == Page.APPEARANCE && ysmModelBox != null) {
-            graphics.drawString(font, "龙龙 PNG 外观（不影响玩家）", skinBox.getX(), skinBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "YSM 模型 ID", ysmModelBox.getX(), ysmModelBox.getY() - 9, 0xC8C8C8, false);
             graphics.drawString(font, "YSM 材质 ID", ysmTextureBox.getX(), ysmTextureBox.getY() - 9, 0xC8C8C8, false);
         }

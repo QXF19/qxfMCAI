@@ -4,6 +4,7 @@ import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.entity.ModEntities;
+import cn.qxf.mcai.compat.MaidVisualBridge;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -56,6 +57,7 @@ public final class CompanionManager {
         companion.moveTo(player.getX() + 1.0D, player.getY(), player.getZ() + 1.0D, player.getYRot(), 0.0F);
         player.serverLevel().addFreshEntity(companion);
         register(companion);
+        MaidVisualBridge.ensure(companion);
         return companion;
     }
 
@@ -63,6 +65,7 @@ public final class CompanionManager {
         if (companion.level() != player.serverLevel()) {
             net.minecraft.nbt.CompoundTag saved = new net.minecraft.nbt.CompoundTag();
             companion.saveWithoutId(saved);
+            MaidVisualBridge.discard(companion);
             companion.discard();
             BY_OWNER.remove(player.getUUID());
             AiCompanionEntity replacement = ModEntities.AI_COMPANION.get().create(player.serverLevel());

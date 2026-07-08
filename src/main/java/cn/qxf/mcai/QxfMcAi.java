@@ -27,7 +27,7 @@ public final class QxfMcAi {
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
         McAiConfig.ensureSkinDirectory();
-        LOGGER.info("qxfMCAI v5.0.0 已加载：等待 Forge 完成服务端配置绑定");
+        LOGGER.info("qxfMCAI v6.0.0 已加载：YSM 女仆实体桥与轻量任务核心就绪");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
