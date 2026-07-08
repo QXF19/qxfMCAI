@@ -14,18 +14,22 @@ import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 
 /**
- * 龙龙始终使用独立的玩家型渲染器，不替换或修改真实玩家的皮肤。
- * 自定义皮肤或附属模型不可用时，SkinLoader 会返回安全的可见贴图。
+ * v6 的旧任务核心不再绘制；可见身体由车万女仆实体和 YSM 渲染。
  */
 public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, PlayerModel<AiCompanionEntity>> {
     public AiCompanionRenderer(EntityRendererProvider.Context context) {
         super(context, new PlayerModel<>(context.bakeLayer(ModelLayers.PLAYER), false), 0.5F);
-        addLayer(new DragonFurryLayer(this, context.getModelSet()));
+    }
+
+    @Override
+    public void render(AiCompanionEntity entity, float yaw, float partialTick, PoseStack pose,
+                       MultiBufferSource buffers, int light) {
+        // v6 的可见身体由车万女仆 + YSM 渲染；本实体只执行实际任务。
     }
 
     @Override
     public ResourceLocation getTextureLocation(AiCompanionEntity entity) {
-        return SkinLoader.textureFor(entity.getSkinName());
+        return net.minecraft.world.inventory.InventoryMenu.BLOCK_ATLAS;
     }
 
     @Override

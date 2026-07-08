@@ -21,6 +21,8 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'info'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
             mods {
                 qxfmcai { source sourceSets.main }
             }
@@ -37,6 +39,7 @@ repositories {
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    implementation fg.deobf("maven.modrinth:R0bDWFAW:g1SKoGQJ")
     if (!project.hasProperty('qxfNoYsm')) {
         runtimeOnly fg.deobf("maven.modrinth:86xjpqqS:Zqooxsd2")
     }
