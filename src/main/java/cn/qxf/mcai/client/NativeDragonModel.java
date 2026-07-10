@@ -84,7 +84,9 @@ public final class NativeDragonModel extends HierarchicalModel<AiCompanionEntity
         blue.addOrReplaceChild("chest", CubeListBuilder.create().texOffs(0, 48)
             .addBox(-3.4F, 0, -2.55F, 6.8F, 7.5F, 0.7F, new CubeDeformation(0.02F)), PartPose.offset(0, 7, 0));
         blue.addOrReplaceChild("face_accent", CubeListBuilder.create().texOffs(28, 48)
-            .addBox(-2.2F, -2.5F, -6.5F, 4.4F, 2.0F, 0.5F), PartPose.offset(0, 5, 0));
+            .addBox(-2.2F, -2.5F, -6.5F, 4.4F, 2.0F, 0.5F)
+            .texOffs(40, 55).addBox(-3.0F, -6.0F, -4.35F, 1.5F, 2.0F, 0.5F)
+            .texOffs(48, 55).addBox(1.5F, -6.0F, -4.35F, 1.5F, 2.0F, 0.5F), PartPose.offset(0, 5, 0));
 
         PartDefinition gold = root.addOrReplaceChild("gold", CubeListBuilder.create(), PartPose.ZERO);
         gold.addOrReplaceChild("horns", CubeListBuilder.create().texOffs(40, 48)

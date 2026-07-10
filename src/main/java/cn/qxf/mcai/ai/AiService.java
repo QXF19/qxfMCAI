@@ -60,6 +60,12 @@ public final class AiService {
     public static void ask(ServerPlayer player, String prompt, boolean proactive) {
         init();
         UUID playerId = player.getUUID();
+        if (!proactive) {
+            AiCompanionEntity relationship = CompanionManager.find(player);
+            if (relationship == null) relationship = CompanionManager.summon(player);
+            relationship.addFavorability(1);
+            relationship.remember("玩家主动和我交流：" + prompt);
+        }
         // 任务意图先在服务端确定性执行，API 只负责补充人格化回复和复杂计划。
         // 这样即使模型只说“我知道了”、返回了坏 JSON 或网络很慢，任务也不会丢失。
         List<AgentAction> immediateActions = inferActionsLocally(prompt);
