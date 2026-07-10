@@ -202,14 +202,14 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public void tick() {
         super.tick();
         if (level().isClientSide) return;
+        if (familyChild) {
+            if (getMode() != Mode.FOLLOW) setMode(Mode.FOLLOW);
+            return;
+        }
         if (tickCount == 20) {
             level().getEntities(this, getBoundingBox().inflate(256.0D),
                 entity -> entity.getPersistentData().getBoolean("QxfMcAiDragon"))
                 .forEach(Entity::discard);
-        }
-        if (familyChild) {
-            if (getMode() != Mode.FOLLOW) setMode(Mode.FOLLOW);
-            return;
         }
         if (tickCount % 20 == 0) CompanionManager.register(this);
         if (tickCount % 40 == 1) {
@@ -363,7 +363,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         String finishedType = currentTask == null ? "unknown" : currentTask.type();
         if (success) {
             completedTasks++;
-            addFavorability(1);
+            addFavorability(5);
             addExperience(5);
             remember("完成：" + result);
             emote("proud", result + "！");
@@ -1211,7 +1211,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             accessories.setItem(i, held.copyWithCount(1));
             if (!player.getAbilities().instabuild) held.shrink(1);
             entityData.set(DATA_ACCESSORY_COUNT, getAccessoryCount() + 1);
-            addFavorability(2);
+            addFavorability(8);
             speak("谢谢你的饰品，我会好好戴着。", "happy");
             return true;
         }
@@ -1454,7 +1454,10 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         dragonLevel = Math.max(1, tag.getInt("DragonLevel"));
         dragonExperience = Math.max(0, tag.getInt("DragonExperience"));
         completedTasks = Math.max(0, tag.getInt("DragonCompletedTasks"));
-        entityData.set(DATA_FAVORABILITY, Mth.clamp(tag.getInt("DragonFavorability"), 0, 100));
+        int savedFavorability = dataVersion < 7
+            ? Math.min(100, completedTasks * 5)
+            : tag.getInt("DragonFavorability");
+        entityData.set(DATA_FAVORABILITY, Mth.clamp(savedFavorability, 0, 100));
         entityData.set(DATA_FAMILY_CONSENT, tag.getBoolean("DragonFamilyConsent"));
         childrenCount = Math.max(0, tag.getInt("DragonChildren"));
         lastFamilyProposal = tag.getLong("DragonFamilyProposal");
