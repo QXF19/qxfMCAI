@@ -91,7 +91,7 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v7：单实体平滑动作、原生3D渲染；任务先执行、聊天后返回。按 M 打开控制中心。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v8：单实体平滑动作、原生3D渲染；任务先执行、聊天后返回。按 M 打开控制中心。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);

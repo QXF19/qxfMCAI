@@ -29,6 +29,9 @@ public final class McAiConfig {
     public static final ForgeConfigSpec.IntValue MINING_RADIUS;
     public static final ForgeConfigSpec.IntValue MINING_DEPTH;
     public static final ForgeConfigSpec.IntValue MINING_BREAK_TICKS;
+    public static final ForgeConfigSpec.IntValue TASK_FAVORABILITY_GAIN;
+    public static final ForgeConfigSpec.IntValue ACCESSORY_FAVORABILITY_GAIN;
+    public static final ForgeConfigSpec.IntValue CHAT_FAVORABILITY_GAIN;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -74,6 +77,15 @@ public final class McAiConfig {
             .defineInRange("miningDepth", 24, 8, 64);
         MINING_BREAK_TICKS = b.comment("挖掘每个矿石所需 tick，20 tick 约等于1秒")
             .defineInRange("miningBreakTicks", 30, 10, 200);
+
+        b.push("relationship");
+        TASK_FAVORABILITY_GAIN = b.comment("每完成一项任务增加的好感度")
+            .defineInRange("taskFavorabilityGain", 5, 0, 100);
+        ACCESSORY_FAVORABILITY_GAIN = b.comment("玩家赠送一件饰品增加的好感度")
+            .defineInRange("accessoryFavorabilityGain", 8, 0, 100);
+        CHAT_FAVORABILITY_GAIN = b.comment("玩家主动与已召唤的龙龙聊天增加的好感度")
+            .defineInRange("chatFavorabilityGain", 1, 0, 100);
+        b.pop();
         b.pop();
         SPEC = b.build();
     }
