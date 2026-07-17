@@ -363,7 +363,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         String finishedType = currentTask == null ? "unknown" : currentTask.type();
         if (success) {
             completedTasks++;
-            addFavorability(5);
+            addFavorability(McAiConfig.TASK_FAVORABILITY_GAIN.get());
             addExperience(5);
             remember("完成：" + result);
             emote("proud", result + "！");
@@ -1211,7 +1211,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             accessories.setItem(i, held.copyWithCount(1));
             if (!player.getAbilities().instabuild) held.shrink(1);
             entityData.set(DATA_ACCESSORY_COUNT, getAccessoryCount() + 1);
-            addFavorability(8);
+            addFavorability(McAiConfig.ACCESSORY_FAVORABILITY_GAIN.get());
             speak("谢谢你的饰品，我会好好戴着。", "happy");
             return true;
         }
@@ -1454,9 +1454,12 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         dragonLevel = Math.max(1, tag.getInt("DragonLevel"));
         dragonExperience = Math.max(0, tag.getInt("DragonExperience"));
         completedTasks = Math.max(0, tag.getInt("DragonCompletedTasks"));
+        int storedFavorability = tag.getInt("DragonFavorability");
+        int migratedTaskFavorability = (int) Math.min(100L,
+            (long) completedTasks * McAiConfig.TASK_FAVORABILITY_GAIN.get());
         int savedFavorability = dataVersion < 7
-            ? Math.min(100, completedTasks * 5)
-            : tag.getInt("DragonFavorability");
+            ? Math.max(storedFavorability, migratedTaskFavorability)
+            : storedFavorability;
         entityData.set(DATA_FAVORABILITY, Mth.clamp(savedFavorability, 0, 100));
         entityData.set(DATA_FAMILY_CONSENT, tag.getBoolean("DragonFamilyConsent"));
         childrenCount = Math.max(0, tag.getInt("DragonChildren"));

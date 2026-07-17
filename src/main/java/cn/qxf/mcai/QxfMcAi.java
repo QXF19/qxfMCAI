@@ -25,7 +25,7 @@ public final class QxfMcAi {
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
-        LOGGER.info("qxfMCAI v7.0.0 已加载：单实体原生3D龙龙与轻量任务核心就绪");
+        LOGGER.info("qxfMCAI v8.0.0 已加载：单实体原生3D龙龙与可调好感度系统就绪");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

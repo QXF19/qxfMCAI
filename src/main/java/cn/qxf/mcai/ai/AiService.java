@@ -62,9 +62,11 @@ public final class AiService {
         UUID playerId = player.getUUID();
         if (!proactive) {
             AiCompanionEntity relationship = CompanionManager.find(player);
-            if (relationship == null) relationship = CompanionManager.summon(player);
-            relationship.addFavorability(1);
-            relationship.remember("玩家主动和我交流：" + prompt);
+            // 聊天只发展已建立的关系；召唤必须由 /mcai summon 或明确任务触发。
+            if (relationship != null) {
+                relationship.addFavorability(McAiConfig.CHAT_FAVORABILITY_GAIN.get());
+                relationship.remember("玩家主动和我交流：" + prompt);
+            }
         }
         // 任务意图先在服务端确定性执行，API 只负责补充人格化回复和复杂计划。
         // 这样即使模型只说“我知道了”、返回了坏 JSON 或网络很慢，任务也不会丢失。
@@ -109,15 +111,23 @@ public final class AiService {
                     if (!player.isAlive()) return;
                     player.sendSystemMessage(Component.literal("<龙龙> " + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
                     AiCompanionEntity companion = CompanionManager.find(player);
-                    if (companion == null) companion = CompanionManager.summon(player);
-                    companion.speak(reply.text(), reply.emotion());
-                    companion.setThought(reply.thought());
-                    companion.remember("玩家说：" + prompt);
-                    companion.remember("龙龙回应：" + reply.text());
+                    if (companion != null) {
+                        companion.speak(reply.text(), reply.emotion());
+                        companion.setThought(reply.thought());
+                        companion.remember("玩家说：" + prompt);
+                        companion.remember("龙龙回应：" + reply.text());
+                    }
                     if (immediateActions.isEmpty()) {
                         List<AgentAction> resolvedActions = reply.actions().isEmpty()
                             ? inferActionsLocally(prompt) : reply.actions();
-                        CompanionManager.applyActions(player, resolvedActions);
+                        // 模型返回的动作不得绕过“明确召唤”的边界。
+                        if (companion != null) {
+                            CompanionManager.applyActions(player, resolvedActions);
+                        } else if (!resolvedActions.isEmpty() && !proactive) {
+                            player.sendSystemMessage(Component.literal(
+                                "[qxfMCAI] 龙龙尚未召唤，AI 规划的动作未执行。请先使用 /mcai summon。")
+                                .withStyle(ChatFormatting.YELLOW));
+                        }
                         if (resolvedActions.isEmpty())
                             QxfMcAi.LOGGER.info("龙龙将本次输入识别为纯聊天：{}", prompt);
                     }

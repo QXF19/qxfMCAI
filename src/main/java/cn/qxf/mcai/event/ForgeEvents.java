@@ -65,7 +65,7 @@ public final class ForgeEvents {
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI v7] 龙龙使用单实体原生3D；按 M 打开菜单，Shift+右键打开27格背包。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v8] 龙龙使用单实体原生3D；按 M 打开菜单，Shift+右键打开27格背包。")
                 .withStyle(ChatFormatting.AQUA));
         }
     }

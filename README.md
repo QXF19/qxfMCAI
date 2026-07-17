@@ -1,13 +1,18 @@
-# qxfMCAI v7
+# qxfMCAI v8
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.4.10%2B-DFA86A)](https://files.minecraftforge.net/)
-[![Version](https://img.shields.io/badge/version-7.0.0-ff77aa)](https://github.com/QXF19/qxfMCAI/releases)
+[![Version](https://img.shields.io/badge/version-8.0.0-ff77aa)](https://github.com/QXF19/qxfMCAI/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 面向 Minecraft Java 1.20.1 / Forge 的全中文智能生存伙伴。龙龙会在世界中真正移动、挖矿、建造、耕作、战斗、使用工具并消耗耐久，而不是只回复聊天。
 
-## v7 重点
+## v8 重点
+
+- 任务、饰品和聊天的好感度增量改为服务端可调配置，默认为 5 / 8 / 1
+- 纯聊天不再隐式召唤龙龙；请使用 `/mcai summon` 明确建立关系
+- v7 之前的存档迁移保留旧好感度和任务推算值中的较大值
+- 保留 v7 的原生 3D 白龙、真实任务、性能优化和轻量单实体架构
 
 - 单实体原生 3D 白龙：不再使用车万女仆代理实体，不再高频传送同步
 - 原生头部、口鼻、龙角、兽耳、翅膀、双段尾巴和蓝金日系 Furry 饰纹
@@ -25,7 +30,7 @@
 ## 安装
 
 1. 安装 Minecraft 1.20.1 与 Forge 47.4.10 或更高版本。
-2. 下载 `qxfmcai-7.0.0.jar` 放入客户端与服务端的 `mods` 文件夹。
+2. 下载 `qxfmcai-8.0.0.jar` 放入客户端与服务端的 `mods` 文件夹。
 3. 不再需要 Yes Steve Model 或 Touhou Little Maid。
 4. 进入世界后按 M 打开菜单，使用 `/mcai summon` 召唤龙龙。
 
@@ -56,4 +61,4 @@
 ./gradlew build
 ```
 
-输出位于 `build/libs/qxfmcai-7.0.0.jar`。
+输出位于 `build/libs/qxfmcai-8.0.0.jar`。
