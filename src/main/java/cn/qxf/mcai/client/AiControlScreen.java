@@ -14,6 +14,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
+import org.lwjgl.glfw.GLFW;
 
 /** v9 单屏智能体控制台：任务输入为主，密集传统选择菜单已移除。 */
 public final class AiControlScreen extends Screen {
@@ -293,7 +294,8 @@ public final class AiControlScreen extends Screen {
     }
 
     @Override public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (view == View.CONTROL && commandBox != null && commandBox.isFocused() && keyCode == 257) {
+        if (view == View.CONTROL && commandBox != null && commandBox.isFocused()
+            && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
             submitNaturalLanguage(); return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);

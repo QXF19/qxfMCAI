@@ -90,6 +90,13 @@ import java.util.List;
 import java.util.Locale;
 
 public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob {
+    private static final int AI_AUTONOMY_INTERVAL_TICKS = 2_400;
+    private static final int INDEPENDENT_SUGGESTION_INTERVAL_TICKS = 6_000;
+    private static final int TASK_PROGRESS_REVIEW_TICKS = 600;
+    private static final int TASK_HARD_TIMEOUT_TICKS = 3_600;
+    private static final int ORE_SEARCH_TIMEOUT_TICKS = 1_800;
+    private static final int CAVE_SEARCH_TIMEOUT_TICKS = 2_400;
+    private static final int MAX_NAVIGATION_RECOVERY_ATTEMPTS = 4;
     private static final EntityDataAccessor<Integer> DATA_MODE =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Boolean> DATA_INVINCIBLE =
@@ -239,8 +246,9 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             default -> { }
         }
         if (McAiConfig.AUTONOMY_ENABLED.get() && currentTask == null && taskQueue.isEmpty()
-            && tickCount % 2400 == 0) autonomousDecision();
-        if (currentTask == null && taskQueue.isEmpty() && tickCount % 6000 == 0) offerIndependentSuggestion();
+            && tickCount % AI_AUTONOMY_INTERVAL_TICKS == 0) autonomousDecision();
+        if (currentTask == null && taskQueue.isEmpty()
+            && tickCount % INDEPENDENT_SUGGESTION_INTERVAL_TICKS == 0) offerIndependentSuggestion();
         if (tickCount % 1200 == 0) offerFamilyProposal();
     }
 
@@ -275,9 +283,9 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (currentTask == null && !taskQueue.isEmpty()) startTask(taskQueue.removeFirst());
         if (currentTask == null) return;
         taskTicks++;
-        if (taskTicks % 600 == 0 && getOwner() instanceof ServerPlayer owner)
+        if (taskTicks % TASK_PROGRESS_REVIEW_TICKS == 0 && getOwner() instanceof ServerPlayer owner)
             AiService.reviewAgentState(owner, "任务进度", describeForAi(), true);
-        if (taskTicks > 3600) finishTask(false, "长时间无新进展，已安全停止并保留已完成成果");
+        if (taskTicks > TASK_HARD_TIMEOUT_TICKS) finishTask(false, "长时间无新进展，已安全停止并保留已完成成果");
     }
 
     private void startTask(AgentAction action) {
@@ -606,7 +614,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (miningTarget == null) {
             if (searchTunnelTarget == null) searchTunnelTarget = createTunnelTarget();
             if (tickCount % 4 == 0) excavateToward(serverLevel, searchTunnelTarget);
-            if (taskTicks > 1800) finishTask(false, "已实际向下开凿并搜索 90 秒，当前范围未发现矿石");
+            if (taskTicks > ORE_SEARCH_TIMEOUT_TICKS) finishTask(false, "已实际向下开凿并搜索 90 秒，当前范围未发现矿石");
             return;
         }
         Vec3 center = Vec3.atCenterOf(miningTarget);
@@ -641,7 +649,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (workTarget == null) {
             if (searchTunnelTarget == null) searchTunnelTarget = createTunnelTarget();
             if (tickCount % 4 == 0) excavateToward(level, searchTunnelTarget);
-            if (taskTicks > 2400) finishTask(false, "已向下开凿并搜索 120 秒，当前范围未找到天然矿洞");
+            if (taskTicks > CAVE_SEARCH_TIMEOUT_TICKS) finishTask(false, "已向下开凿并搜索 120 秒，当前范围未找到天然矿洞");
             return;
         }
         BlockPos target = workTarget.immutable();
@@ -779,7 +787,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         }
         if (workTarget == null && !selectReachableExploreTarget()) {
             navigationRecoveryAttempts++;
-            if (navigationRecoveryAttempts >= 4)
+            if (navigationRecoveryAttempts >= MAX_NAVIGATION_RECOVERY_ATTEMPTS)
                 finishTask(true, workProgress > 0 ? "已完成可达区域巡查" : "已检查附近，暂无更多安全可达路线");
             return;
         }
@@ -791,7 +799,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             return;
         }
         if (position().distanceToSqr(lastTaskPosition) < 0.04D && getNavigation().isDone()) {
-            if (++navigationRecoveryAttempts >= 4) workTarget = null;
+            if (++navigationRecoveryAttempts >= MAX_NAVIGATION_RECOVERY_ATTEMPTS) workTarget = null;
         } else {
             lastTaskPosition = position();
         }
