@@ -91,11 +91,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v8：单实体平滑动作、原生3D渲染；任务先执行、聊天后返回。按 M 打开控制中心。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v9：API负责智能决策，本地实体负责真实执行；按 M 打开高级控制台。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v7 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("v9 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -117,11 +117,31 @@ public final class McAiCommands {
     private static int action(CommandSourceStack source, String type, int count)
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
-        AiCompanionEntity companion = CompanionManager.find(player);
-        if (companion == null) companion = CompanionManager.summon(player);
-        companion.enqueueAction(new AgentAction(type, "", count, "", ""));
-        source.sendSuccess(() -> Component.literal("[龙龙] 任务已立即启动或进入连续队列：" + type + " × " + count), false);
+        if ("stop".equals(type)) {
+            CompanionManager.applyActions(player, java.util.List.of(AgentAction.simple("stop")));
+            source.sendSuccess(() -> Component.literal("[龙龙] 已立即停止当前任务。"), false);
+            return 1;
+        }
+        // 快捷命令也进入同一套 API 规划链；无 API、超时或漏动作时由本地计划保底。
+        AiService.ask(player, actionPrompt(type, count), false);
+        source.sendSuccess(() -> Component.literal("[龙龙] 已把快捷任务交给 AI 结合现场规划：" + type + " × " + count), false);
         return 1;
+    }
+
+    private static String actionPrompt(String type, int count) {
+        String task = switch (type) {
+            case "gather" -> "收集附近掉落物"; case "mine" -> "真正向下挖矿";
+            case "find_cave" -> "向下开凿寻找天然矿洞"; case "explore" -> "探索附近安全区域";
+            case "patrol" -> "巡视基地周围"; case "hunt" -> "使用合适武器清理附近怪物";
+            case "chop" -> "使用斧头砍树并收集原木"; case "farm", "harvest", "plant" -> "照料附近农田";
+            case "build_shelter" -> "设计并建造集中庇护所"; case "build_house" -> "观察基地并设计一座实用小房屋后真正建造";
+            case "build_bridge" -> "在当前位置规划并建造一座桥"; case "equip_weapon" -> "装备最合适的武器";
+            case "equip_pickaxe" -> "装备最合适的镐子"; case "place_torch" -> "在这里放置火把照明";
+            case "deposit" -> "把物资整理进附近箱子"; case "fish" -> "使用钓竿钓鱼";
+            case "eat" -> "从自己的物资中进食"; case "sleep" -> "安全休息";
+            case "craft" -> "制作需要的基础材料"; default -> "执行动作 " + type;
+        };
+        return task + "，目标数量 " + count + "；请输出可执行动作并持续根据实际进度调整。";
     }
 
     private static int come(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {

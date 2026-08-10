@@ -52,21 +52,29 @@ public final class ForgeEvents {
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || !(event.player instanceof ServerPlayer player)) return;
         if (!McAiConfig.PROACTIVE_ENABLED.get() || player.tickCount % 20 != 0) return;
-        if (CompanionManager.find(player) == null || !AiService.isConfigured()) return;
+        var companion = CompanionManager.find(player);
+        if (companion == null) return;
         long now = System.currentTimeMillis();
         long interval = McAiConfig.PROACTIVE_INTERVAL_SECONDS.get() * 1000L;
         long last = LAST_PROACTIVE.computeIfAbsent(player.getUUID(), ignored -> now);
         if (now - last < interval) return;
         LAST_PROACTIVE.put(player.getUUID(), now);
-        AiService.ask(player, "请根据你自己的记忆、目标和当前环境主动做决定：可以聊天，也可以安排一个确实能执行的小任务。", true);
+        companion.proactiveLocalMessage();
+        if (AiService.isConfigured())
+            AiService.ask(player, "请根据你的记忆、目标和当前环境主动聊天。只聊天和提建议，不得自主建造或执行任务。", true);
     }
 
     @SubscribeEvent
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI v8] 龙龙使用单实体原生3D；按 M 打开菜单，Shift+右键打开27格背包。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v9] 龙龙已启用API智能循环与真实本地执行；按 M 打开高级控制台。")
                 .withStyle(ChatFormatting.AQUA));
         }
+    }
+
+    @SubscribeEvent
+    public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        LAST_PROACTIVE.remove(event.getEntity().getUUID());
     }
 }

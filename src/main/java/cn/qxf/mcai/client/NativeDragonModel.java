@@ -22,7 +22,9 @@ public final class NativeDragonModel extends HierarchicalModel<AiCompanionEntity
     private final ModelPart white;
     private final ModelPart blue;
     private final ModelPart gold;
+    private final ModelPart body;
     private final ModelPart head;
+    private final ModelPart chest;
     private final ModelPart faceAccent;
     private final ModelPart leftArm;
     private final ModelPart rightArm;
@@ -32,6 +34,8 @@ public final class NativeDragonModel extends HierarchicalModel<AiCompanionEntity
     private final ModelPart rightWing;
     private final ModelPart tail1;
     private final ModelPart tail2;
+    private final ModelPart horns;
+    private final ModelPart belt;
     private final ModelPart ornament;
 
     public NativeDragonModel(ModelPart root) {
@@ -39,7 +43,9 @@ public final class NativeDragonModel extends HierarchicalModel<AiCompanionEntity
         white = root.getChild("white");
         blue = root.getChild("blue");
         gold = root.getChild("gold");
+        body = white.getChild("body");
         head = white.getChild("head");
+        chest = blue.getChild("chest");
         faceAccent = blue.getChild("face_accent");
         leftArm = white.getChild("left_arm");
         rightArm = white.getChild("right_arm");
@@ -49,6 +55,8 @@ public final class NativeDragonModel extends HierarchicalModel<AiCompanionEntity
         rightWing = white.getChild("right_wing");
         tail1 = white.getChild("tail_1");
         tail2 = tail1.getChild("tail_2");
+        horns = gold.getChild("horns");
+        belt = gold.getChild("belt");
         ornament = gold.getChild("ornament");
     }
 
@@ -105,34 +113,82 @@ public final class NativeDragonModel extends HierarchicalModel<AiCompanionEntity
     @Override
     public void translateToHand(HumanoidArm side, PoseStack pose) {
         ModelPart arm = side == HumanoidArm.LEFT ? leftArm : rightArm;
+        white.translateAndRotate(pose);
         arm.translateAndRotate(pose);
-        pose.translate(side == HumanoidArm.LEFT ? 0.04F : -0.04F, 0.62F, 0);
+        pose.translate(side == HumanoidArm.LEFT ? 0.035F : -0.035F, 0.60F, -0.02F);
     }
 
     @Override
     public void setupAnim(AiCompanionEntity entity, float limbSwing, float limbAmount,
                           float age, float headYaw, float headPitch) {
         root.getAllParts().forEach(ModelPart::resetPose);
-        float walk = Mth.clamp(limbAmount, 0, 1);
-        head.yRot = headYaw * Mth.DEG_TO_RAD;
-        head.xRot = headPitch * Mth.DEG_TO_RAD;
+        float motion = Mth.clamp((float) entity.getDeltaMovement().horizontalDistance() * 4.0F, 0, 1);
+        float walk = Mth.clamp(Math.max(limbAmount, motion), 0, 1);
+        float idle = Mth.sin(age * 0.075F);
+        float breath = Mth.sin(age * 0.10F) * 0.045F;
+        float gait = Mth.cos(limbSwing * 0.6662F);
+        float bob = Math.abs(Mth.sin(limbSwing * 0.6662F)) * walk * 0.34F + breath;
+        float bodyLean = walk * 0.055F;
+
+        white.y = blue.y = gold.y = bob;
+        white.xRot = blue.xRot = gold.xRot = bodyLean;
+        body.zRot = gait * walk * 0.035F;
+        chest.zRot = body.zRot;
+        belt.zRot = body.zRot;
+
+        head.yRot = Mth.clamp(headYaw, -65.0F, 65.0F) * Mth.DEG_TO_RAD;
+        head.xRot = Mth.clamp(headPitch, -40.0F, 45.0F) * Mth.DEG_TO_RAD + idle * 0.018F;
         faceAccent.yRot = head.yRot;
         faceAccent.xRot = head.xRot;
-        leftLeg.xRot = Mth.cos(limbSwing * 0.6662F) * 1.25F * walk;
-        rightLeg.xRot = Mth.cos(limbSwing * 0.6662F + Mth.PI) * 1.25F * walk;
-        leftArm.xRot = Mth.cos(limbSwing * 0.6662F + Mth.PI) * walk;
-        rightArm.xRot = Mth.cos(limbSwing * 0.6662F) * walk;
-        float breathe = Mth.sin(age * 0.08F) * 0.04F;
-        leftWing.zRot = -0.38F - breathe - walk * 0.12F;
-        rightWing.zRot = 0.38F + breathe + walk * 0.12F;
-        tail1.yRot = Mth.sin(age * 0.10F) * 0.22F + Mth.sin(limbSwing * 0.4F) * walk * 0.14F;
-        tail2.yRot = Mth.sin(age * 0.10F + 0.8F) * 0.30F;
+        horns.yRot = head.yRot;
+        horns.xRot = head.xRot;
+
+        leftLeg.xRot = gait * 1.12F * walk;
+        rightLeg.xRot = -gait * 1.12F * walk;
+        leftLeg.zRot = -0.025F * walk;
+        rightLeg.zRot = 0.025F * walk;
+        leftArm.xRot = -gait * 0.82F * walk + idle * 0.025F * (1.0F - walk);
+        rightArm.xRot = gait * 0.82F * walk - idle * 0.025F * (1.0F - walk);
+        leftArm.zRot = -0.055F;
+        rightArm.zRot = 0.055F;
+
+        float airborne = entity.onGround() ? 0.0F : 1.0F;
+        float flap = Mth.sin(age * (airborne > 0 ? 0.58F : 0.12F));
+        float wingAmplitude = 0.07F + airborne * 0.48F + walk * 0.06F;
+        leftWing.zRot = -0.38F - flap * wingAmplitude;
+        rightWing.zRot = 0.38F + flap * wingAmplitude;
+        leftWing.yRot = 0.35F + airborne * 0.18F;
+        rightWing.yRot = -0.35F - airborne * 0.18F;
+
+        float tailWave = Mth.sin(age * 0.11F) * 0.20F + Mth.sin(limbSwing * 0.42F) * walk * 0.13F;
+        tail1.yRot = tailWave;
+        tail1.xRot = 0.35F + walk * 0.08F;
+        tail2.yRot = Mth.sin(age * 0.11F + 0.85F) * 0.27F + tailWave * 0.35F;
+        tail2.xRot = 0.22F + Mth.sin(age * 0.08F) * 0.035F;
+
         if (entity.isOrderedToSit()) {
             leftLeg.xRot = rightLeg.xRot = -1.2F;
             leftArm.xRot = rightArm.xRot = -0.25F;
+            white.y = blue.y = gold.y = 3.2F;
+            tail1.xRot = 0.78F;
+            leftWing.zRot = -0.25F;
+            rightWing.zRot = 0.25F;
         }
-        if (entity.swinging || entity.getActivity().contains("挖") || entity.getActivity().contains("砍"))
-            rightArm.xRot = -1.2F + Mth.sin(age * 0.75F) * 1.15F;
+        String activity = entity.getActivity();
+        if (activity.contains("挖") || activity.contains("砍") || activity.contains("收割") || activity.contains("建造")) {
+            float workSwing = Mth.sin(age * 0.72F);
+            rightArm.xRot = -1.30F + workSwing * 1.05F;
+            rightArm.zRot = 0.12F;
+            leftArm.xRot = -0.28F - workSwing * 0.18F;
+            head.xRot += 0.12F;
+            white.xRot = blue.xRot = gold.xRot = 0.10F;
+        } else if (entity.swinging || attackTime > 0.0F) {
+            float attack = Mth.sin(Mth.sqrt(attackTime) * Mth.PI);
+            rightArm.xRot = -1.65F + attack * 1.15F;
+            rightArm.yRot = -0.22F + attack * 0.42F;
+            leftArm.xRot = -0.42F;
+            white.yRot = blue.yRot = gold.yRot = Mth.sin(attackTime * Mth.PI) * 0.10F;
+        }
         ornament.visible = entity.getAccessoryCount() > 0;
     }
 
