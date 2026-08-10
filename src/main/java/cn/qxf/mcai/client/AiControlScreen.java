@@ -1,155 +1,236 @@
 package cn.qxf.mcai.client;
 
+import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.network.ModNetwork;
+import cn.qxf.mcai.network.AiConfigSnapshotPacket;
+import cn.qxf.mcai.network.RequestAiConfigPacket;
 import cn.qxf.mcai.network.UpdateAiConfigPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
+import org.lwjgl.glfw.GLFW;
 
+/** v9 单屏智能体控制台：任务输入为主，密集传统选择菜单已移除。 */
 public final class AiControlScreen extends Screen {
-    private enum Page { COMPANION, TASKS, APPEARANCE, API }
+    private enum View { CONTROL, INTELLIGENCE }
+    private enum PromptSlot { CORE, TASK, AUTONOMY, CHAT }
 
-    private Page page = Page.COMPANION;
+    private View view = View.CONTROL;
+    private PromptSlot promptSlot = PromptSlot.CORE;
     private String provider = "openai";
     private boolean proactive = true;
     private boolean autonomy = true;
-    private boolean allowCommands = true;
     private boolean clearKey;
     private boolean showKey;
+    private String corePrompt = McAiConfig.CORE_AGENT_PROMPT;
+    private String taskPrompt = McAiConfig.TASK_REASONING_PROMPT;
+    private String autonomyPrompt = McAiConfig.AUTONOMY_PROMPT;
+    private String proactiveChatPrompt = McAiConfig.PROACTIVE_CHAT_PROMPT;
+    private EditBox commandBox;
     private EditBox baseUrlBox;
     private EditBox modelBox;
     private EditBox apiKeyBox;
-    private Button providerButton;
-    private Button proactiveButton;
-    private Button autonomyButton;
-    private Button commandButton;
-    private Button clearKeyButton;
-    private Button showKeyButton;
-    private Component localStatus = Component.literal("龙龙会把任务加入实际执行队列");
+    private EditBox promptBox;
+    private NeonButton providerButton;
+    private NeonButton proactiveButton;
+    private NeonButton autonomyButton;
+    private NeonButton showKeyButton;
+    private NeonButton clearKeyButton;
+    private NeonButton promptSlotButton;
+    private Component localStatus = Component.literal("AI 决策·本地真实执行·结果可验证");
     private int panelLeft;
     private int panelTop;
     private int panelWidth;
     private int panelHeight;
+    private boolean snapshotRequested;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI · 龙龙控制中心 v7.0")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI v9 · 龙龙智能体")); }
 
     @Override
     protected void init() {
-        panelWidth = Math.min(360, width - 20);
-        panelHeight = Math.min(270, height - 10);
+        panelWidth = Math.min(500, width - 16);
+        panelHeight = Math.min(310, height - 12);
         panelLeft = (width - panelWidth) / 2;
-        panelTop = Math.max(7, (height - panelHeight) / 2);
-        int left = panelLeft + 10;
-        int contentWidth = panelWidth - 20;
-        int gap = 4;
-        int tabWidth = (contentWidth - gap * 3) / 4;
-        addTab("伙伴", Page.COMPANION, left, tabWidth);
-        addTab("任务", Page.TASKS, left + tabWidth + gap, tabWidth);
-        addTab("互动", Page.APPEARANCE, left + (tabWidth + gap) * 2, tabWidth);
-        addTab("API/权限", Page.API, left + (tabWidth + gap) * 3, tabWidth);
-        int half = (contentWidth - 5) / 2;
-        switch (page) {
-            case COMPANION -> initCompanionPage(left, panelTop + 50, contentWidth, half);
-            case TASKS -> initTasksPage(left, panelTop + 50, contentWidth, half);
-            case APPEARANCE -> initAppearancePage(left, panelTop + 50, contentWidth, half);
-            case API -> initApiPage(left, panelTop + 50, contentWidth, half);
+        panelTop = Math.max(6, (height - panelHeight) / 2);
+        int contentLeft = panelLeft + 18;
+        int contentWidth = panelWidth - 36;
+        int top = panelTop + 64;
+
+        addRenderableWidget(new NeonButton(contentLeft, panelTop + 34, (contentWidth - 8) / 2, 22,
+            Component.literal("行动控制台"), true, () -> switchView(View.CONTROL)));
+        addRenderableWidget(new NeonButton(contentLeft + (contentWidth + 8) / 2, panelTop + 34,
+            (contentWidth - 8) / 2, 22, Component.literal("AI 智能核心"), true,
+            () -> switchView(View.INTELLIGENCE)));
+
+        if (view == View.CONTROL) initControl(contentLeft, top, contentWidth);
+        else initIntelligence(contentLeft, top, contentWidth);
+        if (!snapshotRequested) {
+            snapshotRequested = true;
+            ModNetwork.CHANNEL.sendToServer(new RequestAiConfigPacket());
         }
     }
 
-    private void addTab(String title, Page target, int x, int width) {
-        addRenderableWidget(Button.builder(Component.literal((page == target ? "§d" : "") + title), b -> switchPage(target))
-            .bounds(x, panelTop + 24, width, 20).build());
+    /** 应用服务端脱敏快照；API 密钥从未包含在网络包中。 */
+    public void applyServerSnapshot(AiConfigSnapshotPacket snapshot) {
+        provider = snapshot.provider();
+        proactive = snapshot.proactiveEnabled();
+        autonomy = snapshot.autonomyEnabled();
+        corePrompt = snapshot.corePrompt();
+        taskPrompt = snapshot.taskPrompt();
+        autonomyPrompt = snapshot.autonomyPrompt();
+        proactiveChatPrompt = snapshot.proactiveChatPrompt();
+        if (providerButton != null) providerButton.setMessage(Component.literal(providerLabel()));
+        if (proactiveButton != null) {
+            proactiveButton.accent = proactive;
+            proactiveButton.setMessage(Component.literal(proactiveLabel()));
+        }
+        if (autonomyButton != null) {
+            autonomyButton.accent = autonomy;
+            autonomyButton.setMessage(Component.literal(autonomyLabel()));
+        }
+        if (baseUrlBox != null) baseUrlBox.setValue(snapshot.baseUrl());
+        if (modelBox != null) modelBox.setValue(snapshot.model());
+        if (promptBox != null) promptBox.setValue(promptValue(promptSlot));
+        localStatus = Component.literal("已载入服务端设置·API 密钥保持隐藏");
     }
 
-    private void initCompanionPage(int left, int top, int width, int half) {
-        int y = top;
-        addPair(left, y, half, "召唤/找回", "mcai summon", "来到身边", "mcai come"); y += 25;
-        addPair(left, y, half, "跟随玩家", "mcai follow", "原地等待", "mcai stay"); y += 25;
-        addPair(left, y, half, "警戒保护", "mcai guard", "打开27格背包", "mcai inventory"); y += 25;
-        addPair(left, y, half, "查看等级/想法", "mcai status", "停止并等待", "mcai task stop 1"); y += 25;
-        addPair(left, y, half, "装备最佳武器", "mcai equip weapon", "装备最佳镐子", "mcai equip pickaxe"); y += 25;
-        addPair(left, y, half, "开启无敌（OP4）", "mcai invincible true", "关闭无敌（OP4）", "mcai invincible false"); y += 29;
-        addRenderableWidget(Button.builder(Component.literal("Shift + 右键龙龙，也可直接打开他的独立背包"), b -> {})
-            .bounds(left, y, width, 20).build()).active = false;
+    private void initControl(int left, int top, int width) {
+        commandBox = new EditBox(font, left + 2, top + 2, width - 114, 20, Component.literal("对龙龙说"));
+        commandBox.setMaxLength(512);
+        commandBox.setHint(Component.literal("例：去找铁矿，发现矿洞后告诉我"));
+        commandBox.setBordered(false);
+        addRenderableWidget(commandBox);
+        addRenderableWidget(new NeonButton(left + width - 106, top, 106, 24, Component.literal("发送给 AI 龙龙"), true,
+            this::submitNaturalLanguage));
+
+        String[][] cards = {
+            {"召唤龙龙", "mcai summon"}, {"回到身边", "mcai come"}, {"立即停止", "mcai task stop 1"},
+            {"真实挖矿", "mcai ask 根据现场自主规划并真正挖矿"}, {"寻找矿洞", "mcai ask 向下开凿寻找天然矿洞，找到后告诉我"}, {"AI 建造房屋", "mcai ask 观察基地并设计一座实用小房屋，然后真正建造"},
+            {"照料农田", "mcai ask 检查附近农田并完成可执行的收获或播种"}, {"使用武器战斗", "mcai ask 判断附近威胁，正确使用剑或弓战斗"}, {"伐木收集", "mcai ask 自主选择附近树木，使用斧头伐木并收集"},
+            {"27格物资空间", "mcai inventory"}, {"骑乘龙龙", "mcai ride"}, {"查看智能体状态", "mcai status"}
+        };
+        int gap = 6;
+        int cardWidth = (width - gap * 2) / 3;
+        int y = top + 34;
+        for (int i = 0; i < cards.length; i++) {
+            int column = i % 3;
+            int row = i / 3;
+            String label = cards[i][0], command = cards[i][1];
+            addRenderableWidget(new NeonButton(left + column * (cardWidth + gap), y + row * 30,
+                cardWidth, 24, Component.literal(label), false, () -> runCommand(command, label)));
+        }
     }
 
-    private void initTasksPage(int left, int top, int width, int half) {
-        int y = top;
-        addPair(left, y, half, "独立向下挖矿", "mcai mine", "寻找天然矿洞", "mcai cave"); y += 22;
-        addPair(left, y, half, "伐木并收进背包", "mcai chop", "自主探索地形", "mcai explore"); y += 22;
-        addPair(left, y, half, "照料/收获农田", "mcai farm", "收集附近掉落物", "mcai gather"); y += 22;
-        addPair(left, y, half, "使用武器狩猎", "mcai hunt", "允许发现点传送", "mcai permit teleport"); y += 22;
-        addPair(left, y, half, "巡视基地", "mcai patrol", "放置火把", "mcai task place_torch 1"); y += 22;
-        addPair(left, y, half, "搭建生存庇护所", "mcai build shelter", "建造完整小屋", "mcai build house"); y += 22;
-        addPair(left, y, half, "建造三格宽桥梁", "mcai build bridge", "整理到附近箱子", "mcai task deposit 1"); y += 22;
-        addPair(left, y, half, "制作基础材料", "mcai task craft 1", "吃东西恢复生命", "mcai task eat 1"); y += 24;
-        addRenderableWidget(Button.builder(Component.literal("更多：钓鱼、睡觉、表情、种植等可直接对龙龙说"), b -> {})
-            .bounds(left, y, width, 20).build()).active = false;
+    private void initIntelligence(int left, int top, int width) {
+        int gap = 6;
+        int third = (width - gap * 2) / 3;
+        providerButton = new NeonButton(left, top, third, 22, Component.literal(providerLabel()), true, this::cycleProvider);
+        proactiveButton = new NeonButton(left + third + gap, top, third, 22, Component.literal(proactiveLabel()), proactive,
+            () -> { proactive = !proactive; proactiveButton.accent = proactive; proactiveButton.setMessage(Component.literal(proactiveLabel())); });
+        autonomyButton = new NeonButton(left + (third + gap) * 2, top, third, 22, Component.literal(autonomyLabel()), autonomy,
+            () -> { autonomy = !autonomy; autonomyButton.accent = autonomy; autonomyButton.setMessage(Component.literal(autonomyLabel())); });
+        addRenderableWidget(providerButton);
+        addRenderableWidget(proactiveButton);
+        addRenderableWidget(autonomyButton);
+
+        baseUrlBox = flatBox(left, top + 32, width, 20, "API 基础地址", defaultBaseUrl(provider), 512);
+        modelBox = flatBox(left, top + 58, width, 20, "模型名", defaultModel(provider), 128);
+        apiKeyBox = flatBox(left, top + 84, width - 150, 20, "API 密钥（留空保留）", "", 1024);
+        showKeyButton = new NeonButton(left + width - 144, top + 82, 68, 22, Component.literal("显示密钥"), false, this::toggleKeyVisibility);
+        clearKeyButton = new NeonButton(left + width - 70, top + 82, 70, 22, Component.literal(clearKeyLabel()), false,
+            () -> { clearKey = !clearKey; clearKeyButton.accent = clearKey; clearKeyButton.setMessage(Component.literal(clearKeyLabel())); });
+        addRenderableWidget(showKeyButton);
+        addRenderableWidget(clearKeyButton);
+        updateKeyFormatter();
+
+        promptSlotButton = new NeonButton(left, top + 114, 138, 22, Component.literal(promptSlotLabel()), true, this::cyclePromptSlot);
+        addRenderableWidget(promptSlotButton);
+        promptBox = flatBox(left + 144, top + 116, width - 144, 20, "可修改提示词", promptValue(promptSlot), 8192);
+        addRenderableWidget(new NeonButton(left, top + 146, 138, 22, Component.literal("恢复当前默认"), false, this::restorePromptDefault));
+        addRenderableWidget(new NeonButton(left + 144, top + 146, width - 144, 22,
+            Component.literal("安全保存 API 与智能体设置（OP4）"), true, this::saveAiSettings));
     }
 
-    private void initAppearancePage(int left, int top, int width, int half) {
-        int y = top;
-        addPair(left, y, half, "开心互动", "mcai task emote 1", "查看关系状态", "mcai status"); y += 25;
-        addPair(left, y, half, "赠送主手饰品", "mcai accessory", "骑乘龙龙", "mcai ride"); y += 25;
-        addPair(left, y, half, "开始五子棋", "mcai gomoku start", "棋局状态", "mcai status"); y += 25;
-        addPair(left, y, half, "同意组建家庭", "mcai family accept", "撤回家庭同意", "mcai family decline"); y += 25;
-        addPair(left, y, half, "迎接小龙宝宝", "mcai family child", "打开物资背包", "mcai inventory"); y += 29;
-        addRenderableWidget(Button.builder(Component.literal("单实体原生3D：无女仆依赖、无传送同步卡顿"), b -> {})
-            .bounds(left, y, width, 20).build()).active = false;
+    private EditBox flatBox(int x, int y, int width, int height, String hint, String value, int max) {
+        EditBox box = new EditBox(font, x + 3, y + 2, width - 6, height - 2, Component.literal(hint));
+        box.setBordered(false);
+        box.setHint(Component.literal(hint));
+        box.setMaxLength(max);
+        box.setValue(value);
+        addRenderableWidget(box);
+        return box;
     }
 
-    private void initApiPage(int left, int top, int width, int half) {
-        int y = top;
-        providerButton = Button.builder(Component.literal("提供商：" + provider), b -> cycleProvider()).bounds(left, y, width, 20).build();
-        addRenderableWidget(providerButton); y += 31;
-        baseUrlBox = new EditBox(font, left, y, width, 20, Component.literal("API基础地址"));
-        baseUrlBox.setMaxLength(512); baseUrlBox.setValue(defaultBaseUrl(provider)); addRenderableWidget(baseUrlBox); y += 31;
-        modelBox = new EditBox(font, left, y, width, 20, Component.literal("模型名"));
-        modelBox.setMaxLength(128); modelBox.setValue(defaultModel(provider)); addRenderableWidget(modelBox); y += 31;
-        apiKeyBox = new EditBox(font, left, y, width - 76, 20, Component.literal("API密钥"));
-        apiKeyBox.setMaxLength(1024); addRenderableWidget(apiKeyBox);
-        showKeyButton = Button.builder(Component.literal("显示"), b -> toggleKeyVisibility()).bounds(left + width - 71, y, 71, 20).build();
-        addRenderableWidget(showKeyButton); updateKeyFormatter(); y += 25;
-        proactiveButton = toggle(left, y, half, proactiveLabel(), () -> { proactive = !proactive; proactiveButton.setMessage(Component.literal(proactiveLabel())); });
-        autonomyButton = toggle(left + half + 5, y, half, autonomyLabel(), () -> { autonomy = !autonomy; autonomyButton.setMessage(Component.literal(autonomyLabel())); }); y += 25;
-        clearKeyButton = toggle(left, y, half, clearKeyLabel(), () -> { clearKey = !clearKey; clearKeyButton.setMessage(Component.literal(clearKeyLabel())); });
-        commandButton = toggle(left + half + 5, y, half, commandLabel(), () -> {}); y += 25;
-        commandButton.active = false;
-        addRenderableWidget(Button.builder(Component.literal("保存 API 与权限设置（需要 OP4）"), b -> saveApiSettings()).bounds(left, y, width, 20).build());
+    private void submitNaturalLanguage() {
+        String text = commandBox == null ? "" : commandBox.getValue().trim();
+        if (text.isBlank()) { localStatus = Component.literal("请先输入想让龙龙聊天或执行的内容"); return; }
+        runCommand("mcai ask " + text, "AI 请求");
+        commandBox.setValue("");
     }
 
-    private Button toggle(int x, int y, int width, String label, Runnable action) {
-        Button button = Button.builder(Component.literal(label), b -> action.run()).bounds(x, y, width, 20).build();
-        addRenderableWidget(button);
-        return button;
+    private void runCommand(String command, String label) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null && minecraft.player.connection != null) {
+            minecraft.player.connection.sendCommand(command);
+            localStatus = Component.literal("已提交·" + label);
+        }
     }
 
-    private void addPair(int left, int y, int half, String a, String commandA, String b, String commandB) {
-        addRenderableWidget(button(a, left, y, half, () -> command(commandA)));
-        addRenderableWidget(button(b, left + half + 5, y, half, () -> command(commandB)));
+    private void switchView(View next) {
+        if (view == next) return;
+        if (promptBox != null) storePromptValue();
+        view = next;
+        clearWidgets();
+        init();
     }
-
-    private Button button(String text, int x, int y, int width, Runnable action) {
-        return Button.builder(Component.literal(text), b -> { action.run(); localStatus = Component.literal("已提交：" + text); })
-            .bounds(x, y, width, 20).build();
-    }
-
-    private void switchPage(Page next) { if (page != next) { page = next; clearWidgets(); init(); } }
 
     private void cycleProvider() {
         provider = switch (provider) { case "openai" -> "deepseek"; case "deepseek" -> "custom"; default -> "openai"; };
-        providerButton.setMessage(Component.literal("提供商：" + provider));
-        baseUrlBox.setValue(defaultBaseUrl(provider)); modelBox.setValue(defaultModel(provider)); apiKeyBox.setValue("");
-        clearKey = false; clearKeyButton.setMessage(Component.literal(clearKeyLabel()));
+        providerButton.setMessage(Component.literal(providerLabel()));
+        baseUrlBox.setValue(defaultBaseUrl(provider));
+        modelBox.setValue(defaultModel(provider));
+        apiKeyBox.setValue("");
+        clearKey = false;
+        clearKeyButton.accent = false;
+        clearKeyButton.setMessage(Component.literal(clearKeyLabel()));
     }
 
+    private void cyclePromptSlot() {
+        storePromptValue();
+        promptSlot = switch (promptSlot) { case CORE -> PromptSlot.TASK; case TASK -> PromptSlot.AUTONOMY;
+            case AUTONOMY -> PromptSlot.CHAT; case CHAT -> PromptSlot.CORE; };
+        promptSlotButton.setMessage(Component.literal(promptSlotLabel()));
+        promptBox.setValue(promptValue(promptSlot));
+    }
+
+    private void restorePromptDefault() {
+        promptBox.setValue(switch (promptSlot) { case CORE -> McAiConfig.CORE_AGENT_PROMPT;
+            case TASK -> McAiConfig.TASK_REASONING_PROMPT; case AUTONOMY -> McAiConfig.AUTONOMY_PROMPT;
+            case CHAT -> McAiConfig.PROACTIVE_CHAT_PROMPT; });
+        storePromptValue();
+        localStatus = Component.literal("已恢复当前提示词默认值，点击保存后生效");
+    }
+
+    private void storePromptValue() {
+        if (promptBox == null) return;
+        switch (promptSlot) { case CORE -> corePrompt = promptBox.getValue(); case TASK -> taskPrompt = promptBox.getValue();
+            case AUTONOMY -> autonomyPrompt = promptBox.getValue(); case CHAT -> proactiveChatPrompt = promptBox.getValue(); }
+    }
+
+    private String promptValue(PromptSlot slot) { return switch (slot) { case CORE -> corePrompt; case TASK -> taskPrompt;
+        case AUTONOMY -> autonomyPrompt; case CHAT -> proactiveChatPrompt; }; }
+
     private void toggleKeyVisibility() {
-        showKey = !showKey; showKeyButton.setMessage(Component.literal(showKey ? "隐藏" : "显示")); updateKeyFormatter();
+        showKey = !showKey;
+        showKeyButton.accent = showKey;
+        showKeyButton.setMessage(Component.literal(showKey ? "隐藏密钥" : "显示密钥"));
+        updateKeyFormatter();
     }
 
     private void updateKeyFormatter() {
@@ -157,43 +238,94 @@ public final class AiControlScreen extends Screen {
             FormattedCharSequence.forward(showKey ? value : "•".repeat(value.length()), Style.EMPTY));
     }
 
-    private void saveApiSettings() {
+    private void saveAiSettings() {
+        storePromptValue();
         String url = baseUrlBox.getValue().trim(), model = modelBox.getValue().trim(), key = apiKeyBox.getValue().trim();
-        if ((!url.startsWith("https://") && !url.startsWith("http://")) || model.isEmpty()) {
+        if ((!url.startsWith("https://") && !url.startsWith("http://")) || model.isBlank()) {
             localStatus = Component.literal("地址必须以 http(s):// 开头，模型名不能为空"); return;
         }
+        if (corePrompt.isBlank() || taskPrompt.isBlank() || autonomyPrompt.isBlank() || proactiveChatPrompt.isBlank()) {
+            localStatus = Component.literal("四类提示词都不能为空"); return;
+        }
         ModNetwork.CHANNEL.sendToServer(new UpdateAiConfigPacket(provider, url, model, key, clearKey,
-            proactive, autonomy, true));
-        apiKeyBox.setValue(""); clearKey = false; clearKeyButton.setMessage(Component.literal(clearKeyLabel()));
-        localStatus = Component.literal(allowCommands ? "已保存；警告：龙龙拥有 OP4 全命令执行权" : "已安全保存到服务端");
+            proactive, autonomy, true, corePrompt, taskPrompt, autonomyPrompt, proactiveChatPrompt));
+        apiKeyBox.setValue("");
+        clearKey = false;
+        clearKeyButton.accent = false;
+        clearKeyButton.setMessage(Component.literal(clearKeyLabel()));
+        localStatus = Component.literal("已加密提交到服务端·API 密钥不回传");
     }
 
-    private String proactiveLabel() { return "主动聊天：" + (proactive ? "开" : "关"); }
-    private String autonomyLabel() { return "自主行动：" + (autonomy ? "开" : "关"); }
-    private String commandLabel() { return "最高权限：固定开启"; }
-    private String clearKeyLabel() { return "清除密钥：" + (clearKey ? "是" : "否"); }
-    private static String defaultBaseUrl(String p) { return switch (p) { case "deepseek" -> "https://api.deepseek.com"; case "custom" -> "http://127.0.0.1:11434/v1"; default -> "https://api.openai.com/v1"; }; }
-    private static String defaultModel(String p) { return switch (p) { case "deepseek" -> "deepseek-v4-pro"; case "custom" -> "qwen2.5:7b"; default -> "gpt-5.2-chat-latest"; }; }
-
-    private void command(String command) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player != null && minecraft.player.connection != null && !command.isBlank())
-            minecraft.player.connection.sendCommand(command);
-    }
+    private String providerLabel() { return "模型源·" + provider.toUpperCase(java.util.Locale.ROOT); }
+    private String proactiveLabel() { return "5分钟聊天·" + (proactive ? "开" : "关"); }
+    private String autonomyLabel() { return "AI运行环·" + (autonomy ? "开" : "关"); }
+    private String clearKeyLabel() { return clearKey ? "确认清除" : "保留密钥"; }
+    private String promptSlotLabel() { return switch (promptSlot) { case CORE -> "核心人格提示词";
+        case TASK -> "任务思维提示词"; case AUTONOMY -> "自主决策提示词"; case CHAT -> "5分钟聊天提示词"; }; }
+    private static String defaultBaseUrl(String p) { return switch (p) { case "deepseek" -> "https://api.deepseek.com";
+        case "custom" -> "http://127.0.0.1:11434/v1"; default -> "https://api.openai.com/v1"; }; }
+    private static String defaultModel(String p) { return switch (p) { case "deepseek" -> "deepseek-v4-pro";
+        case "custom" -> "qwen2.5:7b"; default -> "gpt-5.2-chat-latest"; }; }
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
-        graphics.fill(panelLeft - 4, panelTop - 4, panelLeft + panelWidth + 4, panelTop + panelHeight + 4, 0xC00B1020);
-        graphics.drawCenteredString(font, title, width / 2, panelTop + 7, 0xFFFFD8);
-        if (page == Page.API && baseUrlBox != null) {
-            graphics.drawString(font, "API基础地址", baseUrlBox.getX(), baseUrlBox.getY() - 9, 0xC8C8C8, false);
-            graphics.drawString(font, "模型名", modelBox.getX(), modelBox.getY() - 9, 0xC8C8C8, false);
-            graphics.drawString(font, "API密钥（留空保留旧值）", apiKeyBox.getX(), apiKeyBox.getY() - 9, 0xC8C8C8, false);
+        graphics.fillGradient(0, 0, width, height, 0xD0080B18, 0xE0101830);
+        graphics.fillGradient(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight, 0xE0182038, 0xE00C1325);
+        graphics.renderOutline(panelLeft, panelTop, panelWidth, panelHeight, 0x806B8CFF);
+        graphics.fill(panelLeft, panelTop, panelLeft + 4, panelTop + panelHeight, 0xFF6B8CFF);
+        graphics.drawString(font, "龙龙·LONGLONG", panelLeft + 18, panelTop + 12, 0xFFF4F6FF, false);
+        graphics.drawString(font, "v9  AGENT ONLINE", panelLeft + panelWidth - 110, panelTop + 12, 0xFF7EF0D2, false);
+        if (commandBox != null) drawInputSurface(graphics, commandBox.getX() - 3, commandBox.getY() - 2,
+            commandBox.getWidth() + 6, commandBox.getHeight() + 2);
+        if (baseUrlBox != null) {
+            drawInputSurface(graphics, baseUrlBox.getX() - 3, baseUrlBox.getY() - 2, baseUrlBox.getWidth() + 6, 20);
+            drawInputSurface(graphics, modelBox.getX() - 3, modelBox.getY() - 2, modelBox.getWidth() + 6, 20);
+            drawInputSurface(graphics, apiKeyBox.getX() - 3, apiKeyBox.getY() - 2, apiKeyBox.getWidth() + 6, 20);
+            drawInputSurface(graphics, promptBox.getX() - 3, promptBox.getY() - 2, promptBox.getWidth() + 6, 20);
         }
-        graphics.drawCenteredString(font, localStatus, width / 2, panelTop + panelHeight - 13, 0xB8E8FF);
+        graphics.drawString(font, localStatus, panelLeft + 18, panelTop + panelHeight - 17, 0xFF9EC9FF, false);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 
+    private void drawInputSurface(GuiGraphics graphics, int x, int y, int width, int height) {
+        graphics.fill(x, y, x + width, y + height, 0xA0080D1B);
+        graphics.renderOutline(x, y, width, height, 0x604B6D9E);
+    }
+
+    @Override public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (view == View.CONTROL && commandBox != null && commandBox.isFocused()
+            && (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER)) {
+            submitNaturalLanguage(); return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
     @Override public boolean isPauseScreen() { return false; }
+
+    private final class NeonButton extends AbstractButton {
+        private final Runnable action;
+        private boolean accent;
+
+        private NeonButton(int x, int y, int width, int height, Component text, boolean accent, Runnable action) {
+            super(x, y, width, height, text);
+            this.action = action;
+            this.accent = accent;
+        }
+
+        @Override public void onPress() { action.run(); }
+
+        @Override
+        protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            int buttonWidth = getWidth(), buttonHeight = getHeight();
+            int top = !active ? 0x70313A4E : isHoveredOrFocused() ? 0xE04C70D8 : accent ? 0xC0334F9E : 0xB01B2947;
+            int bottom = !active ? 0x70252C3C : isHoveredOrFocused() ? 0xE039BFA5 : accent ? 0xC0247C86 : 0xB0131D34;
+            graphics.fillGradient(getX(), getY(), getX() + buttonWidth, getY() + buttonHeight, top, bottom);
+            graphics.renderOutline(getX(), getY(), buttonWidth, buttonHeight, isHoveredOrFocused() ? 0xFF8FE8FF : 0x705B78B8);
+            graphics.drawCenteredString(font, getMessage(), getX() + buttonWidth / 2, getY() + (buttonHeight - 8) / 2,
+                active ? 0xFFF3F7FF : 0xFF8992A5);
+        }
+
+        @Override protected void updateWidgetNarration(NarrationElementOutput output) { defaultButtonNarrationText(output); }
+    }
 }

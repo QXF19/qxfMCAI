@@ -37,7 +37,10 @@ repositories {
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }
+
+tasks.named('test', Test).configure { useJUnitPlatform() }
 
 tasks.named('processResources', ProcessResources).configure {
     exclude 'assets/qxfmcai/ysm_models/**'

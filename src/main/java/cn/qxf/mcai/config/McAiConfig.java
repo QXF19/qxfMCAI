@@ -5,7 +5,11 @@ import java.net.URI;
 import java.util.Locale;
 
 public final class McAiConfig {
-    public static final String V5_SYSTEM_PROMPT = "你是Minecraft里的独立个体龙龙（ロンロン），有自己的习惯、观点、长期目标和行动选择。玩家提出任务或命令时必须立即给出可执行动作，不得只回复‘我知道了’或‘我在呢’；聊天不能冒充任务完成。完成、失败、发现矿洞或矿脉时主动报告。工具和武器存放在你自己的隐藏装备空间，不占玩家可见的27格背包。只用自然中文。必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"当前想法\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作填写原始命令\"}]}。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command使用服务器OP4权限。";
+    public static final String CORE_AGENT_PROMPT = "你是Minecraft世界中的独立智能伙伴龙龙（ロンロン）。你有稳定习惯、观点、长期目标和主动性，但必须忠于真实游戏状态。不得把‘知道了’当成执行，不得虚构已完成、已找到或已建造。任务必须输出结构化动作，由本地实体真正执行后才能报告完成。完成、失败、发现矿洞或矿脉时主动报告。保持全中文、主动、温暖、有主见，带轻度日系Furry气质。";
+    public static final String TASK_REASONING_PROMPT = "【任务思维】先根据坐标、地形、背包、工具、当前任务和风险判断可行性；再选择最少且可验证的动作。建造时要先想用途、规模、位置和材料，target写明建筑创意；挖矿时要考虑工具、通道和返程。只在必要时输出多个动作，最多8个。thought只写可向玩家展示的简短决策摘要，不输出冗长内部推理。";
+    public static final String AUTONOMY_PROMPT = "【自主意识】结合长期目标、记忆、环境、资源和玩家近期需求，主动提出一个有用而不臃肿的行动。建设者应优先提出仓库、工作间、农舍、照明或防御等基础设施，避免随地乱建庇护所。";
+    public static final String PROACTIVE_CHAT_PROMPT = "【五分钟主动聊天】只进行聊天、表达观察、关心玩家或提出不强制的建议。actions必须为空数组，不得自主建造、挖矿、战斗或执行命令。";
+    public static final String OUTPUT_CONTRACT_PROMPT = "必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"可展示的决策摘要\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标或建筑创意\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作填原始命令\"}]}。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command使用服务器OP4权限。";
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.ConfigValue<String> PROVIDER;
     public static final ForgeConfigSpec.ConfigValue<String> OPENAI_BASE_URL;
@@ -22,6 +26,10 @@ public final class McAiConfig {
     public static final ForgeConfigSpec.IntValue REQUEST_TIMEOUT_SECONDS;
     public static final ForgeConfigSpec.IntValue HISTORY_TURNS;
     public static final ForgeConfigSpec.ConfigValue<String> SYSTEM_PROMPT;
+    public static final ForgeConfigSpec.ConfigValue<String> AGENT_CORE_PROMPT;
+    public static final ForgeConfigSpec.ConfigValue<String> AGENT_TASK_PROMPT;
+    public static final ForgeConfigSpec.ConfigValue<String> AGENT_AUTONOMY_PROMPT;
+    public static final ForgeConfigSpec.ConfigValue<String> AGENT_PROACTIVE_CHAT_PROMPT;
     public static final ForgeConfigSpec.BooleanValue AUTONOMY_ENABLED;
     public static final ForgeConfigSpec.BooleanValue ALLOW_FULL_COMMANDS;
     public static final ForgeConfigSpec.BooleanValue BUILDING_ENABLED;
@@ -62,10 +70,18 @@ public final class McAiConfig {
         PROACTIVE_INTERVAL_SECONDS = b.defineInRange("proactiveIntervalSeconds", 300, 60, 3600);
         REQUEST_TIMEOUT_SECONDS = b.defineInRange("requestTimeoutSeconds", 45, 10, 180);
         HISTORY_TURNS = b.defineInRange("historyTurns", 8, 0, 30);
-        SYSTEM_PROMPT = b.define("systemPrompt", V5_SYSTEM_PROMPT);
+        SYSTEM_PROMPT = b.define("systemPrompt", CORE_AGENT_PROMPT);
+        AGENT_CORE_PROMPT = b.comment("v9可在高级UI修改的核心人格提示词")
+            .define("agentCorePromptV9", CORE_AGENT_PROMPT, McAiConfig::validPrompt);
+        AGENT_TASK_PROMPT = b.comment("任务规划与建造思维提示词")
+            .define("agentTaskPromptV9", TASK_REASONING_PROMPT, McAiConfig::validPrompt);
+        AGENT_AUTONOMY_PROMPT = b.comment("独立的AI自主任务和建造决策提示词")
+            .define("agentAutonomyPromptV9", AUTONOMY_PROMPT, McAiConfig::validPrompt);
+        AGENT_PROACTIVE_CHAT_PROMPT = b.comment("每5分钟触发、且禁止执行动作的主动聊天提示词")
+            .define("agentProactiveChatPromptV9", PROACTIVE_CHAT_PROMPT, McAiConfig::validPrompt);
         AUTONOMY_ENABLED = b.comment("龙龙是否会在空闲时根据夜晚、生命、物资和长期目标自主行动")
             .define("autonomyEnabled", true);
-        ALLOW_FULL_COMMANDS = b.comment("v7兼容字段：龙龙始终以服务器OP4命令源执行明确的命令任务")
+        ALLOW_FULL_COMMANDS = b.comment("v9兼容字段：龙龙始终以服务器OP4命令源执行明确的命令任务")
             .define("allowFullCommands", true);
         BUILDING_ENABLED = b.comment("是否允许龙龙放置方块建造基础设施")
             .define("buildingEnabled", true);
@@ -152,7 +168,9 @@ public final class McAiConfig {
     public static synchronized void updateFromMenu(String provider, String baseUrl, String model,
                                                    String apiKey, boolean clearApiKey,
                                                    boolean proactiveEnabled, boolean autonomyEnabled,
-                                                   boolean allowFullCommands) {
+                                                   boolean allowFullCommands, String corePrompt,
+                                                   String taskPrompt, String autonomyPrompt,
+                                                   String proactiveChatPrompt) {
         ensureConfigLoaded();
         String normalizedProvider = provider.toLowerCase(Locale.ROOT);
         if (!validProvider(normalizedProvider)) throw new IllegalArgumentException("不支持的提供商");
@@ -162,6 +180,9 @@ public final class McAiConfig {
             throw new IllegalArgumentException("模型名不能为空且最多128个字符");
         if (apiKey != null && apiKey.length() > 1024)
             throw new IllegalArgumentException("API密钥过长");
+        if (!validPrompt(corePrompt) || !validPrompt(taskPrompt) || !validPrompt(autonomyPrompt)
+            || !validPrompt(proactiveChatPrompt))
+            throw new IllegalArgumentException("提示词不能为空且每项最多8192个字符");
 
         PROVIDER.set(normalizedProvider);
         switch (normalizedProvider) {
@@ -186,13 +207,25 @@ public final class McAiConfig {
         }
         PROACTIVE_ENABLED.set(proactiveEnabled);
         AUTONOMY_ENABLED.set(autonomyEnabled);
+        AGENT_CORE_PROMPT.set(corePrompt.trim());
+        AGENT_TASK_PROMPT.set(taskPrompt.trim());
+        AGENT_AUTONOMY_PROMPT.set(autonomyPrompt.trim());
+        AGENT_PROACTIVE_CHAT_PROMPT.set(proactiveChatPrompt.trim());
         SPEC.save();
     }
 
-    /** v7 的核心动作契约不依赖旧世界中遗留的 v2/v3 提示词。 */
-    public static String systemPrompt() {
-        return V5_SYSTEM_PROMPT;
+    private static boolean validPrompt(Object value) {
+        return value instanceof String text && !text.isBlank() && text.length() <= 8192;
     }
+
+    /** v9 使用独立人格、任务思维和输出契约，不受旧存档残留提示词影响。 */
+    public static String systemPrompt() {
+        return AGENT_CORE_PROMPT.get() + "\n" + AGENT_TASK_PROMPT.get() + "\n" + OUTPUT_CONTRACT_PROMPT;
+    }
+
+    public static String taskPrompt() { return AGENT_TASK_PROMPT.get(); }
+    public static String autonomyPrompt() { return AGENT_AUTONOMY_PROMPT.get(); }
+    public static String proactiveChatPrompt() { return AGENT_PROACTIVE_CHAT_PROMPT.get(); }
 
     private static void ensureConfigLoaded() {
         if (!SPEC.isLoaded()) throw new IllegalStateException("Forge 服务端配置尚未完成绑定，请进入世界后再保存");

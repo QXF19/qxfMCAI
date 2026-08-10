@@ -10,6 +10,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.net.URI;
@@ -28,6 +29,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public final class AiService {
     private static final Set<String> ALLOWED_ACTIONS = Set.of(
@@ -35,6 +37,7 @@ public final class AiService {
         "harvest", "plant", "farm", "fish", "build_shelter", "build_house", "build_bridge", "place_torch",
         "eat", "sleep", "deposit", "equip_weapon", "equip_pickaxe", "craft", "command", "emote", "stop");
     private static final Set<UUID> PENDING = new HashSet<>();
+    private static final Set<UUID> BACKGROUND_PENDING = new HashSet<>();
     private static final java.util.Map<UUID, Deque<Message>> HISTORY = new java.util.concurrent.ConcurrentHashMap<>();
     private static ExecutorService executor;
     private static HttpClient client;
@@ -68,71 +71,153 @@ public final class AiService {
                 relationship.remember("玩家主动和我交流：" + prompt);
             }
         }
-        // 任务意图先在服务端确定性执行，API 只负责补充人格化回复和复杂计划。
-        // 这样即使模型只说“我知道了”、返回了坏 JSON 或网络很慢，任务也不会丢失。
-        List<AgentAction> immediateActions = inferActionsLocally(prompt);
-        if (!immediateActions.isEmpty()) {
-            CompanionManager.applyActions(player, immediateActions);
-            if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 已立即开始执行：" +
-                    immediateActions.stream().map(AgentAction::type).reduce((a, b) -> a + " → " + b).orElse("任务"))
-                .withStyle(ChatFormatting.GREEN));
+        // API 优先生成计划，本地规划器只负责验证玩家意图并在模型漏动作、坏 JSON 或超时时保底。
+        // 主动聊天是物理隔离的纯对话通道。提示词中的“不得建造/不得执行”也绝不能
+        // 被关键词保底误识别为玩家下达了建造或命令任务。
+        List<AgentAction> localFallbackActions = proactive ? List.of() : LocalTaskPlanner.plan(prompt);
+        boolean taskRequest = !proactive && !localFallbackActions.isEmpty();
+        if (taskRequest && !isConfigured()) {
+            CompanionManager.applyActions(player, localFallbackActions);
+            if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] API 不可用，已启用安全保底并立即执行："
+                    + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
+            return;
         }
         synchronized (PENDING) {
             if (PENDING.contains(playerId)) {
-                if (!proactive && immediateActions.isEmpty()) player.sendSystemMessage(Component.literal("[龙龙] 我正在认真回应上一句话；新任务仍可直接用菜单或命令下达。")
-                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+                if (taskRequest) {
+                    CompanionManager.applyActions(player, localFallbackActions);
+                    if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] AI 正在处理上一次思考，本次任务已用本地保底执行："
+                        + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
+                } else if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 我正在认真回应上一句话。")
+                        .withStyle(ChatFormatting.LIGHT_PURPLE));
                 return;
             }
             if (!isConfigured()) {
-                if (!proactive) player.sendSystemMessage(Component.literal(immediateActions.isEmpty()
-                        ? "[qxfMCAI] 尚未配置API；按 M 填写后可聊天。菜单、命令和可识别任务仍可离线执行。"
-                        : "[qxfMCAI] API 未配置，但任务引擎已经离线开始执行。")
-                    .withStyle(ChatFormatting.YELLOW));
+                if (!proactive) offlineChat(player, prompt);
                 return;
             }
             PENDING.add(playerId);
         }
 
-        String contextPrompt = prompt + "\n\n当前游戏状态：" + gameContext(player);
-        if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 让我观察一下，再决定怎么真正做……")
-            .withStyle(ChatFormatting.DARK_GRAY));
+        String modePrompt = proactive ? McAiConfig.proactiveChatPrompt()
+            : taskRequest ? McAiConfig.taskPrompt() : "【对话】结合现场和记忆自然回应，不要虚构已执行任务。";
+        String contextPrompt = prompt + "\n\n" + modePrompt + "\n\n当前游戏状态：" + gameContext(player);
+        if (!proactive) player.sendSystemMessage(Component.literal(taskRequest
+                ? "[龙龙] AI 正在结合现场生成可执行计划……"
+                : "[龙龙] 让我观察一下，再认真回应……").withStyle(ChatFormatting.DARK_GRAY));
 
-        CompletableFuture.supplyAsync(() -> request(playerId, contextPrompt), executor)
+        MinecraftServer server = player.getServer();
+        if (server == null) {
+            synchronized (PENDING) { PENDING.remove(playerId); }
+            return;
+        }
+        CompletableFuture<ParsedReply> requestFuture = CompletableFuture.supplyAsync(() -> request(playerId, contextPrompt), executor);
+        if (taskRequest) requestFuture = requestFuture.orTimeout(Math.min(15, McAiConfig.REQUEST_TIMEOUT_SECONDS.get()), TimeUnit.SECONDS);
+        requestFuture
             .whenComplete((reply, error) -> {
-                if (player.getServer() == null) return;
-                player.getServer().execute(() -> {
+                server.execute(() -> {
                     synchronized (PENDING) { PENDING.remove(playerId); }
+                    ServerPlayer livePlayer = server.getPlayerList().getPlayer(playerId);
+                    if (livePlayer == null) return;
                     if (error != null) {
-                        if (!proactive) player.sendSystemMessage(Component.literal("[qxfMCAI] 聊天请求失败：" + safeError(error)
-                                + (immediateActions.isEmpty() ? "" : "；已识别的任务仍在执行。"))
+                        if (taskRequest && !proactive) {
+                            CompanionManager.applyActions(livePlayer, localFallbackActions);
+                            livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] AI 规划超时或失败，已无缝切换本地执行："
+                                + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
+                        } else if (!proactive) livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] 聊天请求失败：" + safeError(error))
                             .withStyle(ChatFormatting.RED));
                         return;
                     }
-                    if (!player.isAlive()) return;
-                    player.sendSystemMessage(Component.literal("<龙龙> " + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
-                    AiCompanionEntity companion = CompanionManager.find(player);
+                    if (!livePlayer.isAlive()) return;
+                    livePlayer.sendSystemMessage(Component.literal("<龙龙> " + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
+                    AiCompanionEntity companion = CompanionManager.find(livePlayer);
+                    // 玩家明确交付了任务时，任务本身就是召唤许可；不能让一份有效的 API 计划
+                    // 因为龙龙尚未生成而静默丢失。普通聊天仍不会隐式召唤。
+                    if (taskRequest && companion == null) companion = CompanionManager.summon(livePlayer);
                     if (companion != null) {
                         companion.speak(reply.text(), reply.emotion());
                         companion.setThought(reply.thought());
                         companion.remember("玩家说：" + prompt);
                         companion.remember("龙龙回应：" + reply.text());
                     }
-                    if (immediateActions.isEmpty()) {
-                        List<AgentAction> resolvedActions = reply.actions().isEmpty()
-                            ? inferActionsLocally(prompt) : reply.actions();
-                        // 模型返回的动作不得绕过“明确召唤”的边界。
-                        if (companion != null) {
-                            CompanionManager.applyActions(player, resolvedActions);
-                        } else if (!resolvedActions.isEmpty() && !proactive) {
-                            player.sendSystemMessage(Component.literal(
-                                "[qxfMCAI] 龙龙尚未召唤，AI 规划的动作未执行。请先使用 /mcai summon。")
-                                .withStyle(ChatFormatting.YELLOW));
-                        }
-                        if (resolvedActions.isEmpty())
-                            QxfMcAi.LOGGER.info("龙龙将本次输入识别为纯聊天：{}", prompt);
+                    List<AgentAction> resolvedActions = proactive ? List.of()
+                        : mergeRequiredActions(reply.actions(), localFallbackActions, taskRequest);
+                    if (companion != null) {
+                        CompanionManager.applyActions(livePlayer, resolvedActions);
+                        if (taskRequest && !resolvedActions.isEmpty())
+                            livePlayer.sendSystemMessage(Component.literal("[龙龙] AI 计划已下发：" + LocalTaskPlanner.summary(resolvedActions))
+                                .withStyle(ChatFormatting.GREEN));
+                    } else if (!resolvedActions.isEmpty() && !proactive) {
+                        livePlayer.sendSystemMessage(Component.literal(
+                            "[qxfMCAI] 当前无法生成龙龙，AI 规划已保留，请检查实体生成空间。")
+                            .withStyle(ChatFormatting.YELLOW));
                     }
+                    if (resolvedActions.isEmpty()) QxfMcAi.LOGGER.info("龙龙将本次输入识别为纯聊天：{}", prompt);
                 });
             });
+    }
+
+    private static void offlineChat(ServerPlayer player, String prompt) {
+        AiCompanionEntity companion = CompanionManager.find(player);
+        String reply = prompt.contains("怎么") || prompt.contains("建议")
+            ? "API 暂时不可用，但我仍会观察当前状态。你可以直接交给我挖矿、建造、农田或战斗任务。"
+            : "我在呢。API 断开时我仍能真正执行生存任务，等连接恢复后会继续完整思考。";
+        player.sendSystemMessage(Component.literal("<龙龙> " + reply).withStyle(ChatFormatting.LIGHT_PURPLE));
+        if (companion != null) companion.speak(reply, "curious");
+    }
+
+    /** 保留 API 的行动顺序，同时保证玩家明确要求的任务类型没有被模型漏掉。 */
+    private static List<AgentAction> mergeRequiredActions(List<AgentAction> planned,
+                                                           List<AgentAction> required,
+                                                           boolean taskRequest) {
+        if (!taskRequest) return planned.stream().limit(8).toList();
+        List<AgentAction> merged = new ArrayList<>(planned.stream().limit(8).toList());
+        for (AgentAction fallback : required) {
+            boolean covered = merged.stream().anyMatch(action -> action.type().equals(fallback.type()));
+            if (!covered && merged.size() < 8) merged.add(fallback);
+        }
+        return List.copyOf(merged);
+    }
+
+    /** 执行期间的低频 AI 观察环：进度、失败和完成都会回到同一个智能体上下文。 */
+    public static void reviewAgentState(ServerPlayer player, String phase, String details, boolean allowActions) {
+        if (!isConfigured() || player.getServer() == null) return;
+        init();
+        UUID playerId = player.getUUID();
+        synchronized (BACKGROUND_PENDING) {
+            if (BACKGROUND_PENDING.contains(playerId)) return;
+            synchronized (PENDING) { if (PENDING.contains(playerId)) return; }
+            BACKGROUND_PENDING.add(playerId);
+        }
+        MinecraftServer server = player.getServer();
+        String prompt = "【智能体运行阶段：" + phase + "】\n" + details + "\n"
+            + ("AI自主决策".equals(phase) ? McAiConfig.autonomyPrompt() : McAiConfig.taskPrompt())
+            + "\n请基于真实进度更新想法。只有需要调整计划时才输出 actions。";
+        CompletableFuture.supplyAsync(() -> request(playerId, prompt), executor)
+            .orTimeout(Math.min(20, McAiConfig.REQUEST_TIMEOUT_SECONDS.get()), TimeUnit.SECONDS)
+            .whenComplete((reply, error) -> server.execute(() -> {
+                synchronized (BACKGROUND_PENDING) { BACKGROUND_PENDING.remove(playerId); }
+                ServerPlayer livePlayer = server.getPlayerList().getPlayer(playerId);
+                if (livePlayer == null) return;
+                if (error != null) {
+                    QxfMcAi.LOGGER.warn("龙龙 AI 运行阶段回顾失败：phase={} error={}", phase, safeError(error));
+                    return;
+                }
+                AiCompanionEntity companion = CompanionManager.find(livePlayer);
+                if (companion == null) return;
+                companion.setThought(reply.thought());
+                companion.remember(phase + "：" + reply.text());
+                if (!reply.text().isBlank()) companion.speak(reply.text(), reply.emotion());
+                List<AgentAction> adjustments = allowActions ? reply.actions().stream().limit(4).toList() : List.of();
+                if (!adjustments.isEmpty()) {
+                    CompanionManager.applyActions(livePlayer, adjustments);
+                    livePlayer.sendSystemMessage(Component.literal("[龙龙·AI调整] " + reply.text())
+                        .withStyle(ChatFormatting.AQUA));
+                } else if (!"任务进度".equals(phase)) {
+                    livePlayer.sendSystemMessage(Component.literal("<龙龙> " + reply.text())
+                        .withStyle(ChatFormatting.LIGHT_PURPLE));
+                }
+            }));
     }
 
     private static ParsedReply request(UUID playerId, String prompt) {
@@ -200,52 +285,6 @@ public final class AiService {
         } catch (Exception ignored) {
             return new ParsedReply(clean.isBlank() ? "我在呢。" : clean, "正在理解这句话", "curious", List.of());
         }
-    }
-
-    private static List<AgentAction> inferActionsLocally(String prompt) {
-        String text = prompt == null ? "" : prompt.trim().toLowerCase(java.util.Locale.ROOT);
-        List<AgentAction> actions = new ArrayList<>();
-        if (text.contains("找矿洞") || text.contains("寻找矿洞") || text.contains("天然矿洞") || text.contains("洞穴"))
-            actions.add(AgentAction.simple("find_cave"));
-        else if (text.contains("挖矿") || text.contains("矿石") || text.contains("下矿") || text.contains("采矿"))
-            actions.add(new AgentAction("mine", "ores", numberHint(text, 3), "", ""));
-        if (text.contains("砍树") || text.contains("伐木")) actions.add(new AgentAction("chop", "logs", numberHint(text, 4), "", ""));
-        if (text.contains("建房") || text.contains("房子") || text.contains("小屋")) actions.add(AgentAction.simple("build_house"));
-        else if (text.contains("庇护所")) actions.add(AgentAction.simple("build_shelter"));
-        else if (text.contains("造桥") || text.contains("建桥")) actions.add(AgentAction.simple("build_bridge"));
-        if (text.contains("种地") || text.contains("农田") || text.contains("收割") || text.contains("农作"))
-            actions.add(new AgentAction("farm", "crops", numberHint(text, 3), "", ""));
-        if (text.contains("打怪") || text.contains("战斗") || text.contains("清理怪")) actions.add(new AgentAction("hunt", "monsters", 3, "", ""));
-        if (text.contains("探索")) actions.add(AgentAction.simple("explore"));
-        if (text.contains("巡逻")) actions.add(new AgentAction("patrol", "home", 2, "", ""));
-        if (text.contains("钓鱼")) actions.add(AgentAction.simple("fish"));
-        if (text.contains("整理") || text.contains("放进箱子")) actions.add(AgentAction.simple("deposit"));
-        if (text.contains("跟着我") || text.contains("跟随我")) actions.add(AgentAction.simple("follow"));
-        if (text.contains("停下") || text.contains("停止任务")) actions.add(AgentAction.simple("stop"));
-        String command = extractCommand(text);
-        if (!command.isBlank()) actions.add(new AgentAction("command", "", 1, "", command));
-        return List.copyOf(actions);
-    }
-
-    private static String extractCommand(String text) {
-        String[] markers = {"执行命令", "运行命令", "使用命令", "输入命令"};
-        for (String marker : markers) {
-            int index = text.indexOf(marker);
-            if (index < 0) continue;
-            String command = text.substring(index + marker.length()).trim();
-            while (command.startsWith(":" ) || command.startsWith("：") || command.startsWith("/"))
-                command = command.substring(1).trim();
-            return command;
-        }
-        if (text.startsWith("/")) return text.substring(1).trim();
-        return "";
-    }
-
-    private static int numberHint(String text, int fallback) {
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d{1,3})").matcher(text);
-        if (!matcher.find()) return fallback;
-        try { return Math.max(1, Math.min(64, Integer.parseInt(matcher.group(1)))); }
-        catch (NumberFormatException ignored) { return fallback; }
     }
 
     private static void remember(Deque<Message> history, String user, String assistant) {
