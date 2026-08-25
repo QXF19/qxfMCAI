@@ -6,6 +6,7 @@ import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.game.XiangqiGame;
 import cn.qxf.mcai.game.GoGame;
+import cn.qxf.mcai.game.MahjongGame;
 import cn.qxf.mcai.server.CompanionManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -162,6 +163,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private int gomokuLosses;
     private final XiangqiGame xiangqi = new XiangqiGame();
     private final GoGame goGame = new GoGame();
+    private final MahjongGame mahjongGame = new MahjongGame();
     private int childrenCount;
     private long lastFamilyProposal;
     private long lastBirth;
@@ -1512,6 +1514,9 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public int getXiangqiLonglongWins() { return xiangqi.longlongWins(); }
     public int getGoOwnerWins() { return goGame.ownerWins(); }
     public int getGoLonglongWins() { return goGame.longlongWins(); }
+    public int getMahjongOwnerWins() { return mahjongGame.ownerWins(); }
+    public int getMahjongLonglongWins() { return mahjongGame.longlongWins(); }
+    public int getMahjongOtherAiWins() { return mahjongGame.otherAiWins(); }
     public boolean isFamilyChild() { return familyChild; }
 
     public boolean isCompanionHidden() { return entityData.get(DATA_HIDDEN); }
@@ -1687,6 +1692,41 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public int getGoOwnerCaptures() { return goGame.ownerCaptures(); }
     public int getGoLonglongCaptures() { return goGame.longlongCaptures(); }
 
+    public void startMahjong() {
+        mahjongGame.start(random.nextLong());
+        speak("四人麻将开局，主人先选择一张手牌打出。", "focused");
+    }
+
+    public MahjongGame.Result playMahjong(int handIndex) {
+        MahjongGame.Result result = mahjongGame.play(handIndex, random.nextLong());
+        if (result.accepted()) {
+            speak(result.message(), result.gameOver() ? "joy" : "focused");
+            if (result.gameOver() && result.message().contains("主人胡牌")) addFavorability(2);
+        }
+        return result;
+    }
+
+    public MahjongGame.Result claimMahjong(int claim) {
+        MahjongGame.Result result = mahjongGame.claim(claim, random.nextLong());
+        if (result.accepted()) speak(result.message(), result.gameOver() ? "joy" : "focused");
+        return result;
+    }
+
+    public MahjongGame.Result passMahjong() {
+        MahjongGame.Result result = mahjongGame.pass(random.nextLong());
+        if (result.accepted()) speak(result.message(), result.gameOver() ? "curious" : "focused");
+        return result;
+    }
+
+    public int[] mahjongHandSnapshot() { return mahjongGame.ownerHand(); }
+    public int[] mahjongDiscardsSnapshot() { return mahjongGame.discards(); }
+    public boolean isMahjongActive() { return mahjongGame.isActive(); }
+    public int getMahjongWallRemaining() { return mahjongGame.wallRemaining(); }
+    public int getMahjongAvailableClaims() { return mahjongGame.availableClaims(); }
+    public int getMahjongOwnerMelds() { return mahjongGame.ownerMelds(); }
+    public int getMahjongPendingTile() { return mahjongGame.pendingTile(); }
+    public boolean isMahjongOwnerMustDiscard() { return mahjongGame.ownerMustDiscard(); }
+
     private int chooseGomokuMove() {
         for (byte side : new byte[]{2, 1}) for (int i = 0; i < 81; i++) if (gomokuBoard[i] == 0) {
             gomokuBoard[i] = side;
@@ -1731,6 +1771,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             + "，家庭孩子=" + childrenCount + "，五子棋=" + gomokuWins + "胜/" + gomokuLosses + "负"
             + "，象棋=" + xiangqi.ownerWins() + "主人胜/" + xiangqi.longlongWins() + "龙龙胜"
             + "，围棋=" + goGame.ownerWins() + "主人胜/" + goGame.longlongWins() + "龙龙胜"
+            + "，麻将=" + mahjongGame.ownerWins() + "主人胜/" + mahjongGame.longlongWins() + "龙龙胜/"
+            + mahjongGame.otherAiWins() + "其他AI胜"
             + "，近期记忆=" + String.join("；", memories);
     }
 
@@ -1873,10 +1915,11 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         tag.putInt("DragonGoLonglongCaptures", goGame.longlongCaptures());
         tag.putInt("DragonGoPasses", goGame.consecutivePasses());
         tag.putString("DragonGoKo", goGame.koForbidden());
+        tag.putString("DragonMahjongState", mahjongGame.save());
         tag.put("DragonAccessories", accessories.createTag());
         tag.putBoolean("DragonStarterKitGranted", starterKitGranted);
         tag.putInt("DragonCentralBuildingIndex", centralBuildingIndex);
-        tag.putInt("DragonDataVersion", 11);
+        tag.putInt("DragonDataVersion", 12);
         tag.putString("DragonHabit", habit);
         if (homePosition != null) tag.putLong("DragonHome", homePosition.asLong());
         tag.put("DragonInventory", inventory.createTag());
@@ -1929,6 +1972,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             tag.getInt("DragonGoOwnerWins"), tag.getInt("DragonGoLonglongWins"),
             tag.getInt("DragonGoOwnerCaptures"), tag.getInt("DragonGoLonglongCaptures"),
             tag.getInt("DragonGoPasses"), tag.getString("DragonGoKo"));
+        mahjongGame.load(tag.getString("DragonMahjongState"));
         if (tag.contains("DragonAccessories", Tag.TAG_LIST))
             accessories.fromTag(tag.getList("DragonAccessories", Tag.TAG_COMPOUND));
         int accessoryCount = 0;

@@ -123,7 +123,7 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v11：轻量二维毛毛龙、场景情绪、三合一实体棋盘与 AI 真实执行；按 M 打开紧凑控制台。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v11.1：轻量二维毛毛龙、场景情绪、四合一实体棋桌与 AI 真实执行；按 M 打开紧凑控制台。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、ask、inventory、play、gomoku、chess、mine、cave、farm、hunt、build house"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
@@ -219,7 +219,7 @@ public final class McAiCommands {
         ServerPlayer player = source.getPlayerOrException();
         ItemStack board = new ItemStack(ModBlocks.DRAGON_GAME_BOARD_ITEM.get());
         if (!player.getInventory().add(board)) player.drop(board, false);
-        source.sendSuccess(() -> Component.literal("已领取龙龙三合一棋盘；放在任意方块上，右键打开独立棋局。"), false);
+        source.sendSuccess(() -> Component.literal("已领取龙龙四合一棋桌；放在任意方块上，右键打开五子棋、象棋、围棋或麻将。"), false);
         return 1;
     }
 
@@ -257,7 +257,7 @@ public final class McAiCommands {
     private static int gomokuStart(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
         companion.startGomoku();
-        source.sendSuccess(() -> Component.literal("五子棋已开局。棋面不再刷入聊天，请放置三合一棋盘并右键打开。"), false);
+        source.sendSuccess(() -> Component.literal("五子棋已开局。棋面不再刷入聊天，请放置四合一棋桌并右键打开。"), false);
         return 1;
     }
 

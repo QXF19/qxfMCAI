@@ -10,7 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import cn.qxf.mcai.server.CompanionManager;
 
 public final class ModNetwork {
-    private static final String PROTOCOL = "11";
+    private static final String PROTOCOL = "12";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(QxfMcAi.MOD_ID, "main"),
         () -> PROTOCOL,

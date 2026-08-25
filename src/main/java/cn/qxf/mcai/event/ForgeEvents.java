@@ -71,7 +71,7 @@ public final class ForgeEvents {
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI v11] 轻量二维龙龙与三合一实体棋盘已就绪；按 M 打开控制台。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v11.1] 轻量二维龙龙与四合一实体棋桌已就绪；按 M 打开控制台。")
                 .withStyle(ChatFormatting.AQUA));
         }
     }

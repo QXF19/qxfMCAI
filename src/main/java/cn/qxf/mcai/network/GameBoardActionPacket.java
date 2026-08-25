@@ -17,6 +17,10 @@ public record GameBoardActionPacket(BlockPos pos, int game, int action,
     public static final int START = 0;
     public static final int MOVE = 1;
     public static final int PASS = 2;
+    public static final int CHI = 3;
+    public static final int PENG = 4;
+    public static final int GANG = 5;
+    public static final int HU = 6;
 
     public static void encode(GameBoardActionPacket message, FriendlyByteBuf buffer) {
         buffer.writeBlockPos(message.pos); buffer.writeVarInt(message.game); buffer.writeVarInt(message.action);
@@ -55,7 +59,15 @@ public record GameBoardActionPacket(BlockPos pos, int game, int action,
             if (packet.action == START) { companion.startGo(); result = "13×13围棋已重新开局，主人执黑"; }
             else if (packet.action == PASS) result = companion.passGo().message();
             else if (packet.action == MOVE) result = companion.playGo(packet.toX, packet.toY).message();
+        } else if (packet.game == 3) {
+            if (packet.action == START) { companion.startMahjong(); result = "四人麻将已重新开局，主人先打牌"; }
+            else if (packet.action == MOVE) result = companion.playMahjong(packet.toX).message();
+            else if (packet.action == PASS) result = companion.passMahjong().message();
+            else if (packet.action == CHI) result = companion.claimMahjong(cn.qxf.mcai.game.MahjongGame.CLAIM_CHI).message();
+            else if (packet.action == PENG) result = companion.claimMahjong(cn.qxf.mcai.game.MahjongGame.CLAIM_PENG).message();
+            else if (packet.action == GANG) result = companion.claimMahjong(cn.qxf.mcai.game.MahjongGame.CLAIM_GANG).message();
+            else if (packet.action == HU) result = companion.claimMahjong(cn.qxf.mcai.game.MahjongGame.CLAIM_HU).message();
         }
-        ModNetwork.openGameBoard(player, packet.pos, Math.max(0, Math.min(2, packet.game)), result);
+        ModNetwork.openGameBoard(player, packet.pos, Math.max(0, Math.min(3, packet.game)), result);
     }
 }

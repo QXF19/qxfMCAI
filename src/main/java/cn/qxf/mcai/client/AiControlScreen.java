@@ -97,7 +97,7 @@ public final class AiControlScreen extends Screen {
         });
         y += 27;
         buttonRow(x, y, width, new String[][]{
-            {"领取三合一棋盘", "mcai board"}, {"跟随", "mcai follow"}, {"无敌/生存", "mcai invincible"}, {"AI设置", "@settings"}
+            {"领取四合一棋桌", "mcai board"}, {"跟随", "mcai follow"}, {"无敌/生存", "mcai invincible"}, {"AI设置", "@settings"}
         });
         y += 27;
         buttonRow(x, y, width, new String[][]{

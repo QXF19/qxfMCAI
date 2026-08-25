@@ -14,7 +14,10 @@ public record OpenGameBoardPacket(
     byte[] gomokuBoard, boolean gomokuActive, int gomokuWins, int gomokuLosses,
     String xiangqiBoard, boolean xiangqiActive, int xiangqiOwnerWins, int xiangqiLonglongWins,
     byte[] goBoard, boolean goActive, int goOwnerWins, int goLonglongWins,
-    int goOwnerCaptures, int goLonglongCaptures) {
+    int goOwnerCaptures, int goLonglongCaptures,
+    int[] mahjongHand, int[] mahjongDiscards, boolean mahjongActive,
+    int mahjongOwnerWins, int mahjongLonglongWins, int mahjongOtherAiWins, int mahjongWallRemaining,
+    int mahjongAvailableClaims, int mahjongOwnerMelds, int mahjongPendingTile, boolean mahjongOwnerMustDiscard) {
 
     public static OpenGameBoardPacket from(BlockPos pos, int selectedGame, String message,
                                            AiCompanionEntity companion) {
@@ -25,7 +28,11 @@ public record OpenGameBoardPacket(
             companion.getXiangqiOwnerWins(), companion.getXiangqiLonglongWins(),
             companion.goBoardSnapshot(), companion.isGoActive(),
             companion.getGoOwnerWins(), companion.getGoLonglongWins(),
-            companion.getGoOwnerCaptures(), companion.getGoLonglongCaptures());
+            companion.getGoOwnerCaptures(), companion.getGoLonglongCaptures(),
+            companion.mahjongHandSnapshot(), companion.mahjongDiscardsSnapshot(), companion.isMahjongActive(),
+            companion.getMahjongOwnerWins(), companion.getMahjongLonglongWins(), companion.getMahjongOtherAiWins(),
+            companion.getMahjongWallRemaining(), companion.getMahjongAvailableClaims(), companion.getMahjongOwnerMelds(),
+            companion.getMahjongPendingTile(), companion.isMahjongOwnerMustDiscard());
     }
 
     public static void encode(OpenGameBoardPacket message, FriendlyByteBuf buffer) {
@@ -42,6 +49,12 @@ public record OpenGameBoardPacket(
         buffer.writeBoolean(message.goActive);
         buffer.writeVarInt(message.goOwnerWins); buffer.writeVarInt(message.goLonglongWins);
         buffer.writeVarInt(message.goOwnerCaptures); buffer.writeVarInt(message.goLonglongCaptures);
+        buffer.writeVarIntArray(message.mahjongHand); buffer.writeVarIntArray(message.mahjongDiscards);
+        buffer.writeBoolean(message.mahjongActive);
+        buffer.writeVarInt(message.mahjongOwnerWins); buffer.writeVarInt(message.mahjongLonglongWins);
+        buffer.writeVarInt(message.mahjongOtherAiWins); buffer.writeVarInt(message.mahjongWallRemaining);
+        buffer.writeVarInt(message.mahjongAvailableClaims); buffer.writeVarInt(message.mahjongOwnerMelds);
+        buffer.writeVarInt(message.mahjongPendingTile); buffer.writeBoolean(message.mahjongOwnerMustDiscard);
     }
 
     public static OpenGameBoardPacket decode(FriendlyByteBuf buffer) {
@@ -49,7 +62,10 @@ public record OpenGameBoardPacket(
             buffer.readByteArray(128), buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(),
             buffer.readUtf(128), buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(),
             buffer.readByteArray(256), buffer.readBoolean(), buffer.readVarInt(), buffer.readVarInt(),
-            buffer.readVarInt(), buffer.readVarInt());
+            buffer.readVarInt(), buffer.readVarInt(),
+            buffer.readVarIntArray(20), buffer.readVarIntArray(136), buffer.readBoolean(),
+            buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(),
+            buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt(), buffer.readBoolean());
     }
 
     public static void handle(OpenGameBoardPacket message, Supplier<NetworkEvent.Context> supplier) {
