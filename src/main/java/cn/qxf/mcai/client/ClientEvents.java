@@ -17,8 +17,8 @@ import org.lwjgl.glfw.GLFW;
 
 @Mod.EventBusSubscriber(modid = QxfMcAi.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class ClientEvents {
-    public static final ModelLayerLocation DRAGON_LAYER = new ModelLayerLocation(
-        new ResourceLocation(QxfMcAi.MOD_ID, "native_dragon"), "main");
+    public static final ModelLayerLocation SKIN_LAYER = new ModelLayerLocation(
+        new ResourceLocation(QxfMcAi.MOD_ID, "lightweight_skin"), "main");
     public static final KeyMapping OPEN_MENU = new KeyMapping(
         "key.qxfmcai.open_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_M, "key.categories.qxfmcai");
 
@@ -36,7 +36,7 @@ public final class ClientEvents {
 
     @SubscribeEvent
     public static void registerLayers(EntityRenderersEvent.RegisterLayerDefinitions event) {
-        event.registerLayerDefinition(DRAGON_LAYER, NativeDragonModel::createBodyLayer);
+        event.registerLayerDefinition(SKIN_LAYER, LightweightSkinModel::createBodyLayer);
     }
 
     @Mod.EventBusSubscriber(modid = QxfMcAi.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)

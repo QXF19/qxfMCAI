@@ -68,7 +68,7 @@ public final class AiService {
             // 聊天只发展已建立的关系；召唤必须由 /mcai summon 或明确任务触发。
             if (relationship != null) {
                 relationship.addFavorability(McAiConfig.CHAT_FAVORABILITY_GAIN.get());
-                relationship.remember("玩家主动和我交流：" + prompt);
+                relationship.remember("主人主动和我交流：" + prompt);
             }
         }
         // API 优先生成计划，本地规划器只负责验证玩家意图并在模型漏动作、坏 JSON 或超时时保底。
@@ -124,7 +124,10 @@ public final class AiService {
                             CompanionManager.applyActions(livePlayer, localFallbackActions);
                             livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] AI 规划超时或失败，已无缝切换本地执行："
                                 + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
-                        } else if (!proactive) livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] 聊天请求失败：" + safeError(error))
+                        } else if (proactive) {
+                            AiCompanionEntity companion = CompanionManager.find(livePlayer);
+                            if (companion != null) companion.proactiveLocalMessage();
+                        } else livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] 聊天请求失败：" + safeError(error))
                             .withStyle(ChatFormatting.RED));
                         return;
                     }
@@ -137,7 +140,7 @@ public final class AiService {
                     if (companion != null) {
                         companion.speak(reply.text(), reply.emotion());
                         companion.setThought(reply.thought());
-                        companion.remember("玩家说：" + prompt);
+                        companion.remember("主人说：" + prompt);
                         companion.remember("龙龙回应：" + reply.text());
                     }
                     List<AgentAction> resolvedActions = proactive ? List.of()
@@ -160,8 +163,8 @@ public final class AiService {
     private static void offlineChat(ServerPlayer player, String prompt) {
         AiCompanionEntity companion = CompanionManager.find(player);
         String reply = prompt.contains("怎么") || prompt.contains("建议")
-            ? "API 暂时不可用，但我仍会观察当前状态。你可以直接交给我挖矿、建造、农田或战斗任务。"
-            : "我在呢。API 断开时我仍能真正执行生存任务，等连接恢复后会继续完整思考。";
+            ? "主人，API 暂时不可用，但我仍会观察当前状态。可以直接交给我挖矿、建造、农田或战斗任务。"
+            : "主人，我在呢。API 断开时我仍能真正执行生存任务，等连接恢复后会继续完整思考。";
         player.sendSystemMessage(Component.literal("<龙龙> " + reply).withStyle(ChatFormatting.LIGHT_PURPLE));
         if (companion != null) companion.speak(reply, "curious");
     }
@@ -272,7 +275,7 @@ public final class AiService {
         try {
             JsonObject object = JsonParser.parseString(clean).getAsJsonObject();
             String text = object.has("reply") ? object.get("reply").getAsString() : "我知道啦。";
-            String thought = object.has("thought") ? object.get("thought").getAsString() : "在认真理解玩家的需要";
+            String thought = object.has("thought") ? object.get("thought").getAsString() : "在认真理解主人的需要";
             String emotion = object.has("emotion") ? object.get("emotion").getAsString() : "curious";
             List<AgentAction> actions = new ArrayList<>();
             if (object.has("actions") && object.get("actions").isJsonArray()) {
@@ -305,7 +308,7 @@ public final class AiService {
 
     private static String gameContext(ServerPlayer player) {
         AiCompanionEntity companion = CompanionManager.find(player);
-        return "玩家=" + player.getGameProfile().getName() + "，维度=" + player.level().dimension().location()
+        return "主人账号=" + player.getGameProfile().getName() + "，维度=" + player.level().dimension().location()
             + "，生命=" + Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth())
             + "，饱食度=" + player.getFoodData().getFoodLevel() + "，坐标=" + player.blockPosition().getX()
             + "," + player.blockPosition().getY() + "," + player.blockPosition().getZ()

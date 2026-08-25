@@ -43,7 +43,6 @@ dependencies {
 tasks.named('test', Test).configure { useJUnitPlatform() }
 
 tasks.named('processResources', ProcessResources).configure {
-    exclude 'assets/qxfmcai/ysm_models/**'
     def replaceProperties = [minecraft_version: minecraft_version, forge_version: forge_version,
                              mod_id: mod_id, mod_name: mod_name, mod_version: mod_version,
                              mod_authors: mod_authors]

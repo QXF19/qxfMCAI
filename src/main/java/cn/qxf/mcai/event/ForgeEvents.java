@@ -44,7 +44,7 @@ public final class ForgeEvents {
             if (text.startsWith(prefix)) return text.substring(prefix.length()).trim();
         }
         if (text.equals("@龙龙") || text.equals("龙龙") || text.equals("龍龍"))
-            return "玩家在叫你。请结合自己的当前想法主动回应，并询问或建议一件可以真正执行的事情。";
+            return "主人在叫你。请自然称呼主人，结合自己的当前想法主动回应，并询问或建议一件可以真正执行的事情。";
         return null;
     }
 
@@ -59,16 +59,16 @@ public final class ForgeEvents {
         long last = LAST_PROACTIVE.computeIfAbsent(player.getUUID(), ignored -> now);
         if (now - last < interval) return;
         LAST_PROACTIVE.put(player.getUUID(), now);
-        companion.proactiveLocalMessage();
         if (AiService.isConfigured())
-            AiService.ask(player, "请根据你的记忆、目标和当前环境主动聊天。只聊天和提建议，不得自主建造或执行任务。", true);
+            AiService.ask(player, "请根据记忆、目标和当前环境主动和主人聊天。只说一次，只聊天和提建议，不得自主建造或执行任务。", true);
+        else companion.proactiveLocalMessage();
     }
 
     @SubscribeEvent
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI v9] 龙龙已启用API智能循环与真实本地执行；按 M 打开高级控制台。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v10] 龙龙已换用轻量二维皮肤；按 M 打开紧凑控制台。")
                 .withStyle(ChatFormatting.AQUA));
         }
     }

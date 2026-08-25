@@ -4,6 +4,7 @@ import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
+import cn.qxf.mcai.game.XiangqiGame;
 import cn.qxf.mcai.server.CompanionManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -91,7 +92,11 @@ import java.util.Locale;
 
 public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob {
     private static final int AI_AUTONOMY_INTERVAL_TICKS = 2_400;
-    private static final int INDEPENDENT_SUGGESTION_INTERVAL_TICKS = 6_000;
+    private static final int OWNER_PLAY_INTERVAL_TICKS = 600;
+    private static final int OWNER_PLAY_DURATION_TICKS = 120;
+    private static final String[] PLAY_GESTURES = {
+        "wave", "dance", "cheer", "bow", "shy", "stretch", "nod", "look", "spin", "hop"
+    };
     private static final int TASK_PROGRESS_REVIEW_TICKS = 600;
     private static final int TASK_HARD_TIMEOUT_TICKS = 3_600;
     private static final int ORE_SEARCH_TIMEOUT_TICKS = 1_800;
@@ -106,6 +111,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private static final EntityDataAccessor<String> DATA_EMOTION =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> DATA_ACTIVITY =
+        SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> DATA_GESTURE =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<Integer> DATA_FAVORABILITY =
         SynchedEntityData.defineId(AiCompanionEntity.class, EntityDataSerializers.INT);
@@ -136,18 +143,20 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private Vec3 lastTaskPosition = Vec3.ZERO;
     private int navigationRecoveryAttempts;
     private int bubbleTicks;
+    private int ownerPlayTicks;
     private int dragonLevel = 1;
     private int dragonExperience;
     private int completedTasks;
     private boolean starterKitGranted;
     private int centralBuildingIndex;
-    private String thought = "想和玩家一起把今天过好";
+    private String thought = "想和主人一起把今天过好";
     private String longTermGoal = "建立安全、温暖的共同基地";
     private String habit = "探索者";
     private final byte[] gomokuBoard = new byte[81];
     private boolean gomokuActive;
     private int gomokuWins;
     private int gomokuLosses;
+    private final XiangqiGame xiangqi = new XiangqiGame();
     private int childrenCount;
     private long lastFamilyProposal;
     private long lastBirth;
@@ -175,6 +184,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         entityData.define(DATA_BUBBLE, "");
         entityData.define(DATA_EMOTION, "curious");
         entityData.define(DATA_ACTIVITY, "正在观察世界");
+        entityData.define(DATA_GESTURE, "");
         entityData.define(DATA_FAVORABILITY, 0);
         entityData.define(DATA_ACCESSORY_COUNT, 0);
         entityData.define(DATA_FAMILY_CONSENT, false);
@@ -223,38 +233,93 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 .forEach(Entity::discard);
         }
         if (tickCount % 20 == 0) CompanionManager.register(this);
-        if (tickCount % 40 == 1) {
+        if (tickCount % 600 == 1) {
             ensureOwnEquipment();
         }
         if (bubbleTicks > 0 && --bubbleTicks == 0) entityData.set(DATA_BUBBLE, "");
 
         tickTaskEngine();
-        switch (getMode()) {
-            case MINE -> mineOreTick();
-            case GATHER -> gatherNearbyItem();
-            case EXPLORE, PATROL -> exploreTick();
-            case HUNT -> huntTick();
-            case LUMBER -> lumberTick();
-            case FARM -> farmTick();
-            case FISH -> fishTick();
-            case BUILD -> buildTick();
-            case FOLLOW -> followTick();
-            case STAY -> {
-                setTarget(null);
-                getNavigation().stop();
+        if (ownerPlayTicks > 0 && currentTask == null && taskQueue.isEmpty()) {
+            tickOwnerPlay();
+        } else {
+            switch (getMode()) {
+                case MINE -> mineOreTick();
+                case GATHER -> gatherNearbyItem();
+                case EXPLORE, PATROL -> exploreTick();
+                case HUNT -> huntTick();
+                case LUMBER -> lumberTick();
+                case FARM -> farmTick();
+                case FISH -> fishTick();
+                case BUILD -> buildTick();
+                case FOLLOW -> followTick();
+                case STAY -> {
+                    setTarget(null);
+                    getNavigation().stop();
+                }
+                default -> { }
             }
-            default -> { }
         }
-        if (McAiConfig.AUTONOMY_ENABLED.get() && currentTask == null && taskQueue.isEmpty()
+        if (ownerPlayTicks <= 0 && McAiConfig.AUTONOMY_ENABLED.get() && currentTask == null && taskQueue.isEmpty()
             && tickCount % AI_AUTONOMY_INTERVAL_TICKS == 0) autonomousDecision();
-        if (currentTask == null && taskQueue.isEmpty()
-            && tickCount % INDEPENDENT_SUGGESTION_INTERVAL_TICKS == 0) offerIndependentSuggestion();
+        if (ownerPlayTicks <= 0 && currentTask == null && taskQueue.isEmpty()
+            && tickCount % OWNER_PLAY_INTERVAL_TICKS == 0) startOwnerPlay("");
         if (tickCount % 1200 == 0) offerFamilyProposal();
     }
 
     private void followTick() {
         if (tickCount % 10 == 0 && getOwner() instanceof ServerPlayer owner && distanceToSqr(owner) > 1024.0D)
             teleportTo(owner.getX(), owner.getY(), owner.getZ());
+    }
+
+    /** 空闲时走到主人视线前做短动作，不发第二条聊天，也不改变主人选择的工作模式。 */
+    public boolean startOwnerPlay(String requestedGesture) {
+        if (!(getOwner() instanceof ServerPlayer owner) || currentTask != null || !taskQueue.isEmpty()
+            || distanceToSqr(owner) > 144.0D) return false;
+        String gesture = requestedGesture == null ? "" : requestedGesture.trim().toLowerCase(Locale.ROOT);
+        boolean known = false;
+        for (String value : PLAY_GESTURES) if (value.equals(gesture)) { known = true; break; }
+        if (!known) gesture = PLAY_GESTURES[random.nextInt(PLAY_GESTURES.length)];
+        entityData.set(DATA_GESTURE, gesture);
+        ownerPlayTicks = OWNER_PLAY_DURATION_TICKS;
+        setOrderedToSit(false);
+        setActivity("在主人面前玩耍·" + gestureName(gesture));
+        return true;
+    }
+
+    private void tickOwnerPlay() {
+        if (!(getOwner() instanceof ServerPlayer owner)) { finishOwnerPlay(); return; }
+        Vec3 look = owner.getLookAngle();
+        Vec3 horizontal = new Vec3(look.x, 0, look.z);
+        if (horizontal.lengthSqr() < 0.01D) horizontal = new Vec3(0, 0, 1);
+        horizontal = horizontal.normalize();
+        Vec3 stage = owner.position().add(horizontal.scale(2.2D));
+        if (position().distanceToSqr(stage) > 1.6D && tickCount % 10 == 0)
+            getNavigation().moveTo(stage.x, owner.getY(), stage.z, 1.15D);
+        else if (position().distanceToSqr(stage) <= 1.6D) {
+            getNavigation().stop();
+            getLookControl().setLookAt(owner, 30.0F, 30.0F);
+            String gesture = getGesture();
+            if ("spin".equals(gesture)) setYRot(getYRot() + 18.0F);
+            if ("hop".equals(gesture) && onGround() && ownerPlayTicks % 28 == 0)
+                setDeltaMovement(getDeltaMovement().add(0, 0.34D, 0));
+        }
+        if (--ownerPlayTicks <= 0) finishOwnerPlay();
+    }
+
+    private void finishOwnerPlay() {
+        ownerPlayTicks = 0;
+        entityData.set(DATA_GESTURE, "");
+        setOrderedToSit(getMode() == Mode.STAY);
+        setActivity(getMode().chinese);
+    }
+
+    private static String gestureName(String gesture) {
+        return switch (gesture) {
+            case "wave" -> "挥手"; case "dance" -> "跳舞"; case "cheer" -> "欢呼";
+            case "bow" -> "鞠躬"; case "shy" -> "害羞"; case "stretch" -> "伸懒腰";
+            case "nod" -> "点头"; case "look" -> "好奇张望"; case "spin" -> "转圈";
+            case "hop" -> "开心跳跃"; default -> "互动";
+        };
     }
 
     public void enqueueAction(AgentAction action) {
@@ -298,8 +363,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         QxfMcAi.LOGGER.info("龙龙开始任务：{} × {}，位置={}", action.type(), action.count(), blockPosition());
         String type = action.type();
         switch (type) {
-            case "follow" -> { setMode(Mode.FOLLOW); finishTask(true, "跟着你走"); }
-            case "stay" -> { setMode(Mode.STAY); finishTask(true, "在这里等你"); }
+            case "follow" -> { setMode(Mode.FOLLOW); finishTask(true, "跟着主人走"); }
+            case "stay" -> { setMode(Mode.STAY); finishTask(true, "在这里等主人"); }
             case "guard" -> { setMode(Mode.GUARD); equipBestWeapon(); finishTask(true, "开始警戒"); }
             case "gather" -> setWorkMode(Mode.GATHER, "收集附近物品");
             case "mine" -> {
@@ -329,7 +394,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 boolean done = eatFromInventory();
                 finishTask(done, done ? "补充体力" : "背包里没有食物");
             }
-            case "sleep" -> { setMode(Mode.STAY); emote("sleepy", "有点困啦，靠着你休息一会儿……"); finishTask(true, "休息"); }
+            case "sleep" -> { setMode(Mode.STAY); emote("sleepy", "有点困啦，靠着主人休息一会儿……"); finishTask(true, "休息"); }
             case "deposit" -> {
                 boolean done = depositIntoNearbyContainer();
                 finishTask(done, done ? "整理背包" : "附近没有可以存放物品的箱子");
@@ -348,7 +413,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             }
             case "come" -> {
                 if (getOwner() instanceof ServerPlayer owner) CompanionManager.come(owner, this);
-                finishTask(true, "回到你身边");
+                finishTask(true, "回到主人身边");
             }
             case "command" -> {
                 String command = !action.command().isBlank() ? action.command()
@@ -421,25 +486,25 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         thought = switch (random.nextInt(4)) {
             case 0 -> "想把基地周围变得更安全";
             case 1 -> "在盘算下一次下矿要准备什么";
-            case 2 -> "希望今天能和玩家完成一件像样的事";
+            case 2 -> "希望今天能和主人完成一件像样的事";
             default -> "好奇附近有没有没见过的地方";
         };
     }
 
-    /** 五分钟主动对话的立即本地回馈；API 随后会基于完整状态继续思考。 */
+    /** 未配置 API 或 API 失败时的五分钟聊天保底；此通道永远不产生动作。 */
     public String proactiveLocalMessage() {
         String message;
         if (currentTask != null) {
             message = "我正在" + getActivity() + "，当前进度 " + workProgress + "/" + workGoal
-                + "。我会继续行动，并让 AI 根据现场调整后续计划。";
+                + "。我会继续行动，并让 AI 根据现场调整后续计划，主人放心。";
         } else if (getHealth() < getMaxHealth() * 0.5F) {
-            message = "我现在状态偏低，想先整理食物和装备，再继续帮你做事。";
+            message = "主人，我现在状态偏低，想先整理食物和装备，再继续帮主人做事。";
         } else if (level().isNight()) {
-            message = "天黑了，我想听听你今晚更想冒险、整理物资，还是安心休息。";
+            message = "主人，天黑了，我想听听主人今晚更想冒险、整理物资，还是安心休息。";
         } else {
             message = switch (habit) {
-                case "矿工" -> "今天挖到的东西里，你最希望先补齐哪一种？我想听听你的计划。";
-                case "建设者" -> "我在观察基地布局，不过这会儿只想陪你聊聊：你最喜欢怎样的基地风格？";
+                case "矿工" -> "主人今天最希望先补齐哪一种矿物？我想听听主人的计划。";
+                case "建设者" -> "我在观察基地布局，不过这会儿只想陪主人聊聊：主人最喜欢怎样的基地风格？";
                 case "守卫" -> "我在留意附近的危险和防御死角，不会只站在这里发呆。";
                 default -> "我想看看附近还有哪些安全可达的地方，再让 AI 决定值得做什么。";
             };
@@ -461,7 +526,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         ensureOwnEquipment();
         grantStarterKit();
         if (getMainHandItem().isEmpty()) equipBestWeapon();
-        remember("v9初始化：我习惯做一名" + habit + "，AI负责思考，我的单实体负责真正行动");
+        remember("v10初始化：我习惯做一名" + habit + "，AI负责思考，我的单实体负责真正行动");
     }
 
     public void setHomePosition(BlockPos pos) { homePosition = pos == null ? blockPosition() : pos.immutable(); }
@@ -501,25 +566,13 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         starterKitGranted = true;
     }
 
-    private void offerIndependentSuggestion() {
-        String suggestion = switch (habit) {
-            case "矿工" -> "我想独自向下探一条矿道，发现矿洞后叫你过来，可以吗？";
-            case "建设者" -> "我注意到基地还能扩建，要不要让我自己准备一座物资小屋？";
-            case "守卫" -> "附近的照明和防御还不够，我建议先巡逻并清理威胁。";
-            default -> "我想自己去远处探索；找到有意思的地点后会通知你并申请传送。";
-        };
-        thought = suggestion;
-        speak(suggestion, "curious");
-        notifyOwner("建议：" + suggestion);
-    }
-
     private void offerFamilyProposal() {
         if (!(getOwner() instanceof ServerPlayer owner) || familyChild || getFavorability() < 80 || completedTasks < 10) return;
         long now = level().getGameTime();
         if (now - lastFamilyProposal < 12000) return;
         lastFamilyProposal = now;
         if (!hasFamilyConsent()) {
-            String proposal = "我很珍惜我们一起生活的经历。愿意和我组建家庭、以后一起孕育小龙宝宝吗？只有你明确同意才会继续。";
+            String proposal = "主人，我很珍惜我们一起生活的经历。愿意和我组建家庭、以后一起迎接小龙宝宝吗？只有主人明确同意才会继续。";
             speak(proposal, "happy");
             Component accept = Component.literal(" [同意组建家庭]").withStyle(style -> style
                 .withColor(ChatFormatting.LIGHT_PURPLE).withUnderlined(true)
@@ -529,7 +582,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/mcai family decline")));
             owner.sendSystemMessage(Component.literal("[龙龙] " + proposal).append(accept).append(decline));
         } else if (now - lastBirth >= 24000) {
-            String proposal = "我们的家已经很温暖了。你愿意现在和我一起迎接一个小龙宝宝吗？";
+            String proposal = "主人，我们的家已经很温暖了。愿意现在和我一起迎接一个小龙宝宝吗？";
             speak(proposal, "curious");
             owner.sendSystemMessage(Component.literal("[龙龙] " + proposal).append(Component.literal(" [愿意]")
                 .withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
@@ -1329,6 +1382,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
 
     public String getBubble() { return entityData.get(DATA_BUBBLE); }
     public String getEmotion() { return entityData.get(DATA_EMOTION); }
+    public String getGesture() { return entityData.get(DATA_GESTURE); }
     public String getActivity() { return entityData.get(DATA_ACTIVITY); }
     public void setActivity(String activity) { entityData.set(DATA_ACTIVITY, sanitize(activity, 80, "空闲")); }
     public String getThought() { return thought; }
@@ -1348,6 +1402,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public int getChildrenCount() { return childrenCount; }
     public int getGomokuWins() { return gomokuWins; }
     public int getGomokuLosses() { return gomokuLosses; }
+    public int getXiangqiOwnerWins() { return xiangqi.ownerWins(); }
+    public int getXiangqiLonglongWins() { return xiangqi.longlongWins(); }
     public boolean isFamilyChild() { return familyChild; }
 
     public boolean equipAccessory(Player player) {
@@ -1359,7 +1415,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             if (!player.getAbilities().instabuild) held.shrink(1);
             entityData.set(DATA_ACCESSORY_COUNT, getAccessoryCount() + 1);
             addFavorability(McAiConfig.ACCESSORY_FAVORABILITY_GAIN.get());
-            speak("谢谢你的饰品，我会好好戴着。", "happy");
+            speak("谢谢主人的饰品，我会好好戴着。", "happy");
             return true;
         }
         return false;
@@ -1376,13 +1432,13 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         entityData.set(DATA_FAMILY_CONSENT, true);
         lastBirth = level().getGameTime() - 24000;
         addFavorability(5);
-        remember("玩家明确同意和我组建家庭");
-        speak("谢谢你认真回应我。我们慢慢来，一起把家经营好。", "happy");
+        remember("主人明确同意和我组建家庭");
+        speak("谢谢主人认真回应我。我们慢慢来，一起把家经营好。", "happy");
     }
 
     public void declineFamily() {
         entityData.set(DATA_FAMILY_CONSENT, false);
-        speak("没关系，我尊重你的决定，我们还是最可靠的伙伴。", "curious");
+        speak("没关系，我尊重主人的决定，我们还是最可靠的伙伴。", "curious");
     }
 
     public boolean createFamilyChild(ServerPlayer player) {
@@ -1410,7 +1466,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public void startGomoku() {
         java.util.Arrays.fill(gomokuBoard, (byte) 0);
         gomokuActive = true;
-        speak("五子棋开局！使用 /mcai gomoku 下 x y，坐标为0到8。", "focused");
+        speak("主人，五子棋开局！使用 /mcai gomoku move x y，坐标为0到8。", "focused");
     }
 
     public String playGomoku(int x, int y) {
@@ -1423,7 +1479,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             gomokuWins++;
             gomokuActive = false;
             addFavorability(2);
-            return "你赢了！这局很漂亮";
+            return "主人赢了！这局很漂亮";
         }
         int move = chooseGomokuMove();
         if (move < 0) { gomokuActive = false; return "棋盘满了，这局平局"; }
@@ -1434,7 +1490,39 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             gomokuActive = false;
             return "我下在 " + mx + "," + my + "，这局我赢啦";
         }
-        return "我下在 " + mx + "," + my + "，轮到你";
+        return "我下在 " + mx + "," + my + "，轮到主人";
+    }
+
+    public String gomokuBoardText() {
+        StringBuilder text = new StringBuilder("   0 1 2 3 4 5 6 7 8\n");
+        for (int y = 0; y < 9; y++) {
+            text.append(y).append("  ");
+            for (int x = 0; x < 9; x++) text.append(switch (gomokuBoard[y * 9 + x]) {
+                case 1 -> '●'; case 2 -> '○'; default -> '·';
+            }).append(' ');
+            text.append('\n');
+        }
+        return text.toString().stripTrailing();
+    }
+
+    public void startXiangqi() {
+        xiangqi.start();
+        speak("主人执红先走。用 /mcai chess move 起点x 起点y 终点x 终点y。", "focused");
+        startOwnerPlay("bow");
+    }
+
+    public XiangqiGame.Result playXiangqi(int fromX, int fromY, int toX, int toY) {
+        XiangqiGame.Result result = xiangqi.play(fromX, fromY, toX, toY, random.nextLong());
+        if (result.accepted()) {
+            speak(result.message(), result.gameOver() ? "proud" : "focused");
+            addFavorability(result.gameOver() && result.message().contains("主人赢") ? 2 : 0);
+        }
+        return result;
+    }
+
+    public String xiangqiBoardText() {
+        if (!xiangqi.isActive()) xiangqi.start();
+        return xiangqi.boardText();
     }
 
     private int chooseGomokuMove() {
@@ -1479,6 +1567,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             + "，隐藏装备仓=" + String.join("、", equipment) + "，27格背包=" + String.join("、", items)
             + "，好感度=" + getFavorability() + "，饰品=" + accessorySummary()
             + "，家庭孩子=" + childrenCount + "，五子棋=" + gomokuWins + "胜/" + gomokuLosses + "负"
+            + "，象棋=" + xiangqi.ownerWins() + "主人胜/" + xiangqi.longlongWins() + "龙龙胜"
             + "，近期记忆=" + String.join("；", memories);
     }
 
@@ -1569,10 +1658,14 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         tag.putInt("DragonGomokuLosses", gomokuLosses);
         tag.putBoolean("DragonGomokuActive", gomokuActive);
         tag.putByteArray("DragonGomokuBoard", gomokuBoard);
+        tag.putString("DragonXiangqiBoard", xiangqi.saveBoard());
+        tag.putBoolean("DragonXiangqiActive", xiangqi.isActive());
+        tag.putInt("DragonXiangqiOwnerWins", xiangqi.ownerWins());
+        tag.putInt("DragonXiangqiLonglongWins", xiangqi.longlongWins());
         tag.put("DragonAccessories", accessories.createTag());
         tag.putBoolean("DragonStarterKitGranted", starterKitGranted);
         tag.putInt("DragonCentralBuildingIndex", centralBuildingIndex);
-        tag.putInt("DragonDataVersion", 9);
+        tag.putInt("DragonDataVersion", 10);
         tag.putString("DragonHabit", habit);
         if (homePosition != null) tag.putLong("DragonHome", homePosition.asLong());
         tag.put("DragonInventory", inventory.createTag());
@@ -1618,6 +1711,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         gomokuActive = tag.getBoolean("DragonGomokuActive");
         byte[] savedBoard = tag.getByteArray("DragonGomokuBoard");
         if (savedBoard.length == 81) System.arraycopy(savedBoard, 0, gomokuBoard, 0, 81);
+        xiangqi.load(tag.getString("DragonXiangqiBoard"), tag.getBoolean("DragonXiangqiActive"),
+            tag.getInt("DragonXiangqiOwnerWins"), tag.getInt("DragonXiangqiLonglongWins"));
         if (tag.contains("DragonAccessories", Tag.TAG_LIST))
             accessories.fromTag(tag.getList("DragonAccessories", Tag.TAG_COMPOUND));
         int accessoryCount = 0;
