@@ -12,16 +12,16 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 
-/** 单实体原生3D渲染器；动画直接使用龙龙真实移动状态，不再同步代理实体。 */
-public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, NativeDragonModel> {
-    private static final ResourceLocation WHITE = new ResourceLocation("minecraft", "textures/block/white_concrete.png");
+/** v10 原版玩家骨骼 + 用户提供的 64x64 二维毛毛龙皮肤。 */
+public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, LightweightSkinModel> {
+    private static final ResourceLocation SKIN = new ResourceLocation("qxfmcai", "textures/entity/longlong.png");
 
     public AiCompanionRenderer(EntityRendererProvider.Context context) {
-        super(context, new NativeDragonModel(context.bakeLayer(ClientEvents.DRAGON_LAYER)), 0.45F);
+        super(context, new LightweightSkinModel(context.bakeLayer(ClientEvents.SKIN_LAYER)), 0.45F);
         addLayer(new ItemInHandLayer<>(this, context.getItemInHandRenderer()));
     }
 
-    @Override public ResourceLocation getTextureLocation(AiCompanionEntity entity) { return WHITE; }
+    @Override public ResourceLocation getTextureLocation(AiCompanionEntity entity) { return SKIN; }
 
     @Override
     protected void renderNameTag(AiCompanionEntity entity, Component name, PoseStack pose,

@@ -25,7 +25,7 @@ public final class QxfMcAi {
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
-        LOGGER.info("qxfMCAI v9.0.0 已加载：API智能循环、真实任务引擎与新动画系统就绪");
+        LOGGER.info("qxfMCAI v10.0.0 已加载：轻量二维龙龙、主人互动、棋类与真实任务引擎就绪");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

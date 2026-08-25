@@ -49,10 +49,31 @@ public final class McAiCommands {
             .then(Commands.literal("accessory").executes(ctx -> accessory(ctx.getSource())))
             .then(Commands.literal("gomoku")
                 .then(Commands.literal("start").executes(ctx -> gomokuStart(ctx.getSource())))
+                .then(Commands.literal("board").executes(ctx -> gomokuBoard(ctx.getSource())))
+                .then(Commands.literal("move")
+                    .then(Commands.argument("x", IntegerArgumentType.integer(0, 8))
+                        .then(Commands.argument("y", IntegerArgumentType.integer(0, 8))
+                            .executes(ctx -> gomoku(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "x"),
+                                IntegerArgumentType.getInteger(ctx, "y"))))))
                 .then(Commands.argument("x", IntegerArgumentType.integer(0, 8))
                     .then(Commands.argument("y", IntegerArgumentType.integer(0, 8))
                         .executes(ctx -> gomoku(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "x"),
                             IntegerArgumentType.getInteger(ctx, "y"))))))
+            .then(Commands.literal("chess")
+                .then(Commands.literal("start").executes(ctx -> xiangqiStart(ctx.getSource())))
+                .then(Commands.literal("board").executes(ctx -> xiangqiBoard(ctx.getSource())))
+                .then(Commands.literal("move")
+                    .then(Commands.argument("起点x", IntegerArgumentType.integer(0, 8))
+                        .then(Commands.argument("起点y", IntegerArgumentType.integer(0, 9))
+                            .then(Commands.argument("终点x", IntegerArgumentType.integer(0, 8))
+                                .then(Commands.argument("终点y", IntegerArgumentType.integer(0, 9))
+                                    .executes(ctx -> xiangqi(ctx.getSource(),
+                                        IntegerArgumentType.getInteger(ctx, "起点x"), IntegerArgumentType.getInteger(ctx, "起点y"),
+                                        IntegerArgumentType.getInteger(ctx, "终点x"), IntegerArgumentType.getInteger(ctx, "终点y")))))))))
+            .then(Commands.literal("play")
+                .executes(ctx -> play(ctx.getSource(), ""))
+                .then(Commands.argument("动作", StringArgumentType.word())
+                    .executes(ctx -> play(ctx.getSource(), StringArgumentType.getString(ctx, "动作")))))
             .then(Commands.literal("family")
                 .then(Commands.literal("accept").executes(ctx -> family(ctx.getSource(), "accept")))
                 .then(Commands.literal("decline").executes(ctx -> family(ctx.getSource(), "decline")))
@@ -91,18 +112,18 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v9：API负责智能决策，本地实体负责真实执行；按 M 打开高级控制台。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v10：轻量二维毛毛龙、AI真实执行与主人互动；按 M 打开紧凑控制台。")
             .withStyle(ChatFormatting.AQUA), false);
-        source.sendSuccess(() -> Component.literal("常用：summon、inventory、mine、cave、chop、farm、hunt、explore、build house、permit teleport、ask"), false);
+        source.sendSuccess(() -> Component.literal("常用：summon、ask、inventory、play、gomoku、chess、mine、cave、farm、hunt、build house"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v9 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("v10 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
 
     private static int summon(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         CompanionManager.summon(source.getPlayerOrException());
-        source.sendSuccess(() -> Component.literal("[龙龙] 我来啦！这次会和你一起真正生活、工作和成长。")
+        source.sendSuccess(() -> Component.literal("[龙龙] 主人，我来啦！这次会一起真正生活、工作和玩耍。")
             .withStyle(ChatFormatting.LIGHT_PURPLE), false);
         return 1;
     }
@@ -178,15 +199,55 @@ public final class McAiCommands {
     }
 
     private static int gomokuStart(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        getOrSummon(source).startGomoku();
-        source.sendSuccess(() -> Component.literal("五子棋已开局：/mcai gomoku 下 x y（0到8）。"), false);
+        AiCompanionEntity companion = getOrSummon(source);
+        companion.startGomoku();
+        source.sendSuccess(() -> Component.literal("五子棋已开局：/mcai gomoku move x y（0到8）。\n"
+            + companion.gomokuBoardText()), false);
         return 1;
     }
 
     private static int gomoku(CommandSourceStack source, int x, int y) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        String result = getOrSummon(source).playGomoku(x, y);
-        source.sendSuccess(() -> Component.literal("[龙龙] " + result), false);
+        AiCompanionEntity companion = getOrSummon(source);
+        String result = companion.playGomoku(x, y);
+        source.sendSuccess(() -> Component.literal("[龙龙] " + result + "\n" + companion.gomokuBoardText()), false);
         return 1;
+    }
+
+    private static int gomokuBoard(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        String board = getOrSummon(source).gomokuBoardText();
+        source.sendSuccess(() -> Component.literal(board), false);
+        return 1;
+    }
+
+    private static int xiangqiStart(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        AiCompanionEntity companion = getOrSummon(source);
+        companion.startXiangqi();
+        source.sendSuccess(() -> Component.literal("中国象棋开局，主人执红。\n" + companion.xiangqiBoardText()), false);
+        return 1;
+    }
+
+    private static int xiangqi(CommandSourceStack source, int fromX, int fromY, int toX, int toY)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        AiCompanionEntity companion = getOrSummon(source);
+        var result = companion.playXiangqi(fromX, fromY, toX, toY);
+        source.sendSuccess(() -> Component.literal("[龙龙] " + result.message() + "\n" + result.board()), false);
+        return result.accepted() ? 1 : 0;
+    }
+
+    private static int xiangqiBoard(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        String board = getOrSummon(source).xiangqiBoardText();
+        source.sendSuccess(() -> Component.literal(board), false);
+        return 1;
+    }
+
+    private static int play(CommandSourceStack source, String gesture)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        AiCompanionEntity companion = getOrSummon(source);
+        boolean started = companion.startOwnerPlay(gesture);
+        source.sendSuccess(() -> Component.literal(started
+            ? "龙龙正在主人面前玩耍。动作：wave/dance/cheer/bow/shy/stretch/nod/look/spin/hop"
+            : "龙龙正在执行任务或离主人太远，暂时不能玩耍。"), false);
+        return started ? 1 : 0;
     }
 
     private static int family(CommandSourceStack source, String action) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
@@ -263,12 +324,13 @@ public final class McAiCommands {
             + companion.getDragonExperience() + "），模式=" + companion.getMode().chinese + "，活动=" + companion.getActivity()
             + "，习惯=" + companion.getHabit() + "，想法=" + companion.getThought()
             + "，已完成任务=" + companion.getCompletedTasks()), false);
-        source.sendSuccess(() -> Component.literal("原生3D=已启用（无外部渲染依赖），API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
+        source.sendSuccess(() -> Component.literal("轻量二维皮肤=已启用（原版玩家骨骼，无YSM），API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
         source.sendSuccess(() -> Component.literal("隐藏装备仓=已启用（工具/武器/箭不占27格物资背包）"), false);
         source.sendSuccess(() -> Component.literal("好感度=" + companion.getFavorability()
             + "，饰品=" + companion.accessorySummary() + "，五子棋=" + companion.getGomokuWins() + "胜/"
             + companion.getGomokuLosses() + "负，家庭孩子=" + companion.getChildrenCount()
-            + "，家庭同意=" + (companion.hasFamilyConsent() ? "是" : "否")), false);
+            + "，家庭同意=" + (companion.hasFamilyConsent() ? "是" : "否")
+            + "，象棋=" + companion.getXiangqiOwnerWins() + "主人胜/" + companion.getXiangqiLonglongWins() + "龙龙胜"), false);
         return 1;
     }
 

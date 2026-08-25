@@ -11,8 +11,8 @@ authors="${mod_authors}"
 displayURL="https://github.com/QXF19/qxfMCAI"
 description='''
 全中文 Minecraft Forge 智能伙伴“龙龙”。支持 OpenAI、DeepSeek 与自定义兼容模型，
-拥有实际挖矿、建造、战斗、储物和命令执行能力。v9 以 API 负责智能决策，
-本地单实体 3D 白龙负责真实行动，内置可编辑提示词、高级 UI、好感度与轻量互动。
+拥有实际挖矿、建造、战斗、储物和命令执行能力。v10 以 API 负责智能决策，
+本地单实体与用户提供的轻量二维毛毛龙皮肤负责真实行动，并提供主人互动、五子棋、中国象棋和紧凑设置界面。
 '''
 
 [[dependencies.${mod_id}]]
