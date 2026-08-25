@@ -41,6 +41,8 @@ public final class CompanionManager {
     public static AiCompanionEntity summon(ServerPlayer player) {
         AiCompanionEntity existing = find(player);
         if (existing != null) {
+            existing.setCompanionHidden(false);
+            existing.setMode(AiCompanionEntity.Mode.FOLLOW);
             come(player, existing);
             return existing;
         }
@@ -52,7 +54,7 @@ public final class CompanionManager {
         companion.setCompanionInvincible(true);
         companion.setHomePosition(player.blockPosition());
         companion.initializeIndependentAgent();
-        companion.setMode(AiCompanionEntity.Mode.PATROL);
+        companion.setMode(AiCompanionEntity.Mode.FOLLOW);
         companion.moveTo(player.getX() + 1.0D, player.getY(), player.getZ() + 1.0D, player.getYRot(), 0.0F);
         player.serverLevel().addFreshEntity(companion);
         register(companion);
@@ -60,6 +62,8 @@ public final class CompanionManager {
     }
 
     public static void come(ServerPlayer player, AiCompanionEntity companion) {
+        companion.setCompanionHidden(false);
+        companion.setMode(AiCompanionEntity.Mode.FOLLOW);
         if (companion.level() != player.serverLevel()) {
             net.minecraft.nbt.CompoundTag saved = new net.minecraft.nbt.CompoundTag();
             companion.saveWithoutId(saved);

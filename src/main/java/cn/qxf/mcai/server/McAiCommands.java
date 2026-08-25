@@ -4,6 +4,7 @@ import cn.qxf.mcai.ai.AgentAction;
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
+import cn.qxf.mcai.block.ModBlocks;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -13,6 +14,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 
 public final class McAiCommands {
     private McAiCommands() {}
@@ -42,10 +44,15 @@ public final class McAiCommands {
                 .then(Commands.literal("pickaxe").executes(ctx -> action(ctx.getSource(), "equip_pickaxe", 1))))
             .then(Commands.literal("come").executes(ctx -> come(ctx.getSource())))
             .then(Commands.literal("inventory").executes(ctx -> inventory(ctx.getSource())))
+            .then(Commands.literal("board").executes(ctx -> board(ctx.getSource())))
             .then(Commands.literal("permit")
                 .then(Commands.literal("teleport").executes(ctx -> permitTeleport(ctx.getSource()))))
             .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
             .then(Commands.literal("ride").executes(ctx -> ride(ctx.getSource())))
+            .then(Commands.literal("hide")
+                .executes(ctx -> hide(ctx.getSource(), null))
+                .then(Commands.argument("隐藏", BoolArgumentType.bool())
+                    .executes(ctx -> hide(ctx.getSource(), BoolArgumentType.getBool(ctx, "隐藏")))))
             .then(Commands.literal("accessory").executes(ctx -> accessory(ctx.getSource())))
             .then(Commands.literal("gomoku")
                 .then(Commands.literal("start").executes(ctx -> gomokuStart(ctx.getSource())))
@@ -87,6 +94,7 @@ public final class McAiCommands {
                         .executes(ctx -> action(ctx.getSource(), StringArgumentType.getString(ctx, "动作"),
                             IntegerArgumentType.getInteger(ctx, "数量"))))))
             .then(Commands.literal("invincible").requires(source -> source.hasPermission(4))
+                .executes(ctx -> invincible(ctx.getSource(), null))
                 .then(Commands.argument("开启", BoolArgumentType.bool())
                     .executes(ctx -> invincible(ctx.getSource(), BoolArgumentType.getBool(ctx, "开启")))))
             .then(Commands.literal("provider").requires(source -> source.hasPermission(4))
@@ -99,6 +107,9 @@ public final class McAiCommands {
                 .then(Commands.argument("最高权限命令", StringArgumentType.greedyString())
                     .executes(ctx -> highestCommand(ctx.getSource(),
                         StringArgumentType.getString(ctx, "最高权限命令")))))
+            .then(Commands.literal("special")
+                .then(Commands.literal("teleport_to_qxf1975")
+                    .executes(ctx -> teleportToQxf1975(ctx.getSource()))))
         );
     }
 
@@ -112,11 +123,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v10：轻量二维毛毛龙、AI真实执行与主人互动；按 M 打开紧凑控制台。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v11：轻量二维毛毛龙、场景情绪、三合一实体棋盘与 AI 真实执行；按 M 打开紧凑控制台。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、ask、inventory、play、gomoku、chess、mine、cave、farm、hunt、build house"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v10 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("v11 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -185,9 +196,54 @@ public final class McAiCommands {
     private static int ride(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         AiCompanionEntity companion = getOrSummon(source);
-        boolean result = player.startRiding(companion, true);
-        source.sendSuccess(() -> Component.literal(result ? "已骑上龙龙；潜行键下马。" : "现在无法骑乘。"), false);
+        boolean result = companion.mountOwner(player);
+        source.sendSuccess(() -> Component.literal(result ? "已骑上龙龙；方向键控制，潜行键下马。" : "现在无法骑乘。"), false);
         return result ? 1 : 0;
+    }
+
+    private static int hide(CommandSourceStack source, Boolean requested)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        AiCompanionEntity companion = getOrSummon(source);
+        boolean hidden = requested == null ? !companion.isCompanionHidden() : requested;
+        companion.setCompanionHidden(hidden);
+        companion.reactToOwnerAction(hidden ? "主人把我隐藏了" : "主人让我重新出现在身边",
+            hidden ? "sad" : "joy", hidden ? null : "我回来啦，主人！");
+        source.sendSuccess(() -> Component.literal(hidden
+            ? "龙龙已隐藏；任务与思考继续运行，使用 /mcai hide false 显示。"
+            : "龙龙已重新显示并恢复跟随。"), false);
+        if (!hidden) companion.setMode(AiCompanionEntity.Mode.FOLLOW);
+        return 1;
+    }
+
+    private static int board(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ItemStack board = new ItemStack(ModBlocks.DRAGON_GAME_BOARD_ITEM.get());
+        if (!player.getInventory().add(board)) player.drop(board, false);
+        source.sendSuccess(() -> Component.literal("已领取龙龙三合一棋盘；放在任意方块上，右键打开独立棋局。"), false);
+        return 1;
+    }
+
+    private static int teleportToQxf1975(CommandSourceStack source)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer traveler = source.getPlayerOrException();
+        ServerPlayer destination = traveler.server.getPlayerList().getPlayerByName("qxf1975");
+        if (destination == null) {
+            source.sendFailure(Component.literal("特殊传送失败：目的地玩家 qxf1975 当前不在线。"));
+            return 0;
+        }
+        if (traveler == destination) {
+            source.sendSuccess(() -> Component.literal("你就是 qxf1975，无需传送。"), false);
+            return 1;
+        }
+        traveler.teleportTo(destination.serverLevel(), destination.getX() + 1.0D, destination.getY(),
+            destination.getZ() + 1.0D, destination.getYRot(), destination.getXRot());
+        AiCompanionEntity companion = CompanionManager.find(traveler);
+        if (companion != null) {
+            companion.remember("主人使用特殊控制台传送到了 qxf1975 身边");
+            companion.speak("主人已安全到达 qxf1975 身边。", "joy");
+        }
+        source.sendSuccess(() -> Component.literal("已传送到 qxf1975 身边。"), false);
+        return 1;
     }
 
     private static int accessory(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
@@ -201,28 +257,27 @@ public final class McAiCommands {
     private static int gomokuStart(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
         companion.startGomoku();
-        source.sendSuccess(() -> Component.literal("五子棋已开局：/mcai gomoku move x y（0到8）。\n"
-            + companion.gomokuBoardText()), false);
+        source.sendSuccess(() -> Component.literal("五子棋已开局。棋面不再刷入聊天，请放置三合一棋盘并右键打开。"), false);
         return 1;
     }
 
     private static int gomoku(CommandSourceStack source, int x, int y) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
         String result = companion.playGomoku(x, y);
-        source.sendSuccess(() -> Component.literal("[龙龙] " + result + "\n" + companion.gomokuBoardText()), false);
+        source.sendSuccess(() -> Component.literal("[龙龙] " + result + "（棋面请在实体棋盘查看）"), false);
         return 1;
     }
 
     private static int gomokuBoard(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        String board = getOrSummon(source).gomokuBoardText();
-        source.sendSuccess(() -> Component.literal(board), false);
+        getOrSummon(source);
+        source.sendSuccess(() -> Component.literal("棋面已迁移到实体棋盘：使用 /mcai board 领取并放置。"), false);
         return 1;
     }
 
     private static int xiangqiStart(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
         companion.startXiangqi();
-        source.sendSuccess(() -> Component.literal("中国象棋开局，主人执红。\n" + companion.xiangqiBoardText()), false);
+        source.sendSuccess(() -> Component.literal("中国象棋已开局，主人执红。请在实体棋盘界面落子。"), false);
         return 1;
     }
 
@@ -230,13 +285,13 @@ public final class McAiCommands {
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
         var result = companion.playXiangqi(fromX, fromY, toX, toY);
-        source.sendSuccess(() -> Component.literal("[龙龙] " + result.message() + "\n" + result.board()), false);
+        source.sendSuccess(() -> Component.literal("[龙龙] " + result.message() + "（棋面请在实体棋盘查看）"), false);
         return result.accepted() ? 1 : 0;
     }
 
     private static int xiangqiBoard(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        String board = getOrSummon(source).xiangqiBoardText();
-        source.sendSuccess(() -> Component.literal(board), false);
+        getOrSummon(source);
+        source.sendSuccess(() -> Component.literal("棋面已迁移到实体棋盘：使用 /mcai board 领取并放置。"), false);
         return 1;
     }
 
@@ -285,9 +340,10 @@ public final class McAiCommands {
         return 1;
     }
 
-    private static int invincible(CommandSourceStack source, boolean enabled)
+    private static int invincible(CommandSourceStack source, Boolean requested)
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         AiCompanionEntity companion = getOrSummon(source);
+        boolean enabled = requested == null ? !companion.isCompanionInvincible() : requested;
         companion.setCompanionInvincible(enabled);
         source.sendSuccess(() -> Component.literal("龙龙无敌模式：" + (enabled ? "开启" : "关闭")).withStyle(ChatFormatting.GOLD), true);
         return 1;
@@ -329,6 +385,7 @@ public final class McAiCommands {
         source.sendSuccess(() -> Component.literal("好感度=" + companion.getFavorability()
             + "，饰品=" + companion.accessorySummary() + "，五子棋=" + companion.getGomokuWins() + "胜/"
             + companion.getGomokuLosses() + "负，家庭孩子=" + companion.getChildrenCount()
+            + "，显示=" + (companion.isCompanionHidden() ? "隐藏" : "可见")
             + "，家庭同意=" + (companion.hasFamilyConsent() ? "是" : "否")
             + "，象棋=" + companion.getXiangqiOwnerWins() + "主人胜/" + companion.getXiangqiLonglongWins() + "龙龙胜"), false);
         return 1;

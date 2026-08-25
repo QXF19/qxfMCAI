@@ -16,7 +16,7 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
-/** v10 单页紧凑控制台：自然语言、常用操作、互动游戏与 AI 设置合并在同一界面。 */
+/** v11 单页紧凑控制台：自然语言、常用操作、互动入口与 AI 设置合并在同一界面。 */
 public final class AiControlScreen extends Screen {
     private enum PromptSlot { CORE, TASK, AUTONOMY, CHAT }
     private static final String[][] TASK_TEMPLATES = {
@@ -27,6 +27,7 @@ public final class AiControlScreen extends Screen {
         {"伐木收集", "选择附近树木，使用斧头伐木并把原木收进背包"},
         {"探索找洞", "安全探索并向下寻找天然矿洞，找到后报告给主人"}
     };
+    private static final String[] DEEPSEEK_MODELS = {"deepseek-v4-pro", "deepseek-v4-flash"};
 
     private boolean settingsExpanded;
     private boolean snapshotRequested;
@@ -56,13 +57,14 @@ public final class AiControlScreen extends Screen {
     private CompactButton showKeyButton;
     private CompactButton promptButton;
     private CompactButton templateButton;
+    private CompactButton modelPresetButton;
     private Component status = Component.literal("主人，直接告诉我想做什么吧");
     private int left;
     private int top;
     private int panelWidth;
     private int panelHeight;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI v10 · 龙龙紧凑控制台")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI v11 · 龙龙紧凑控制台")); }
 
     @Override
     protected void init() {
@@ -91,11 +93,15 @@ public final class AiControlScreen extends Screen {
             () -> ask(TASK_TEMPLATES[templateIndex][1], TASK_TEMPLATES[templateIndex][0])));
         y += 29;
         buttonRow(x, y, width, new String[][]{
-            {"召回龙龙", "mcai summon"}, {"27格背包", "mcai inventory"}, {"骑乘", "mcai ride"}, {"随机动作", "mcai play"}
+            {"召回并跟随", "mcai summon"}, {"27格背包", "mcai inventory"}, {"骑乘", "mcai ride"}, {"显示/隐藏", "mcai hide"}
         });
         y += 27;
         buttonRow(x, y, width, new String[][]{
-            {"五子棋", "mcai gomoku start"}, {"中国象棋", "mcai chess start"}, {"查看状态", "mcai status"}, {"AI设置", "@settings"}
+            {"领取三合一棋盘", "mcai board"}, {"跟随", "mcai follow"}, {"无敌/生存", "mcai invincible"}, {"AI设置", "@settings"}
+        });
+        y += 27;
+        buttonRow(x, y, width, new String[][]{
+            {"特殊·传送到qxf1975", "mcai special teleport_to_qxf1975"}, {"查看状态", "mcai status"}
         });
         y += 29;
         addRenderableWidget(new CompactButton(x, y, width, 22,
@@ -115,7 +121,8 @@ public final class AiControlScreen extends Screen {
         y += 25;
         baseUrlBox = input(x, y, width, 20, "API地址", baseUrl.isBlank() ? defaultBaseUrl(provider) : baseUrl, 512);
         y += 22;
-        modelBox = input(x, y, width, 20, "模型名", model.isBlank() ? defaultModel(provider) : model, 128);
+        modelBox = input(x, y, width - 104, 20, "模型名", model.isBlank() ? defaultModel(provider) : model, 128);
+        modelPresetButton = button(x + width - 99, y, 99, modelPresetLabel(), false, this::cycleModelPreset);
         y += 22;
         apiKeyBox = input(x, y, width - 150, 20, "API密钥（留空保留）", pendingApiKey, 1024);
         showKeyButton = button(x + width - 145, y, 68, showKey ? "隐藏" : "显示", false, this::toggleKey);
@@ -195,6 +202,18 @@ public final class AiControlScreen extends Screen {
         modelBox.setValue(defaultModel(provider));
         baseUrl = baseUrlBox.getValue();
         model = modelBox.getValue();
+        if (modelPresetButton != null) modelPresetButton.setMessage(Component.literal(modelPresetLabel()));
+    }
+
+    private void cycleModelPreset() {
+        if (!"deepseek".equals(provider)) {
+            status = Component.literal("模型名可直接编辑；DeepSeek 提供 V4 Pro / V4 Flash 预设");
+            return;
+        }
+        String current = modelBox.getValue().trim();
+        modelBox.setValue(DEEPSEEK_MODELS[0].equals(current) ? DEEPSEEK_MODELS[1] : DEEPSEEK_MODELS[0]);
+        model = modelBox.getValue();
+        modelPresetButton.setMessage(Component.literal(modelPresetLabel()));
     }
 
     private void cyclePrompt() {
@@ -262,6 +281,7 @@ public final class AiControlScreen extends Screen {
         if (autonomyButton != null) refreshToggle(autonomyButton, autonomy, autonomyLabel());
         if (baseUrlBox != null) baseUrlBox.setValue(snapshot.baseUrl());
         if (modelBox != null) modelBox.setValue(snapshot.model());
+        if (modelPresetButton != null) modelPresetButton.setMessage(Component.literal(modelPresetLabel()));
         if (promptBox != null) promptBox.setValue(promptValue());
         status = Component.literal("已载入服务端设置·密钥保持隐藏");
     }
@@ -279,6 +299,10 @@ public final class AiControlScreen extends Screen {
 
     private String templateLabel() { return "任务模板·" + TASK_TEMPLATES[templateIndex][0] + "（点击切换）"; }
     private String providerLabel() { return "模型·" + provider.toUpperCase(java.util.Locale.ROOT); }
+    private String modelPresetLabel() {
+        if (!"deepseek".equals(provider)) return "手动模型";
+        return modelBox != null && "deepseek-v4-flash".equals(modelBox.getValue().trim()) ? "V4 Flash" : "V4 Pro";
+    }
     private String proactiveLabel() { return "5分钟聊天·" + (proactive ? "开" : "关"); }
     private String autonomyLabel() { return "自主思考·" + (autonomy ? "开" : "关"); }
     private String promptLabel() { return switch (promptSlot) { case CORE -> "核心人格"; case TASK -> "任务思维";
@@ -295,7 +319,7 @@ public final class AiControlScreen extends Screen {
         graphics.fillGradient(left, top, left + panelWidth, top + panelHeight, 0xED161F35, 0xED0A1120);
         graphics.renderOutline(left, top, panelWidth, panelHeight, 0x906D93FF);
         graphics.fill(left, top, left + 4, top + panelHeight, 0xFF64D8C3);
-        graphics.drawString(font, "龙龙 · LONGLONG  v10", left + 16, top + 12, 0xFFF4F7FF, false);
+        graphics.drawString(font, "龙龙 · LONGLONG  v11", left + 16, top + 12, 0xFFF4F7FF, false);
         graphics.drawString(font, settingsExpanded ? "AI设置 · 与控制台合并" : "轻量二维皮肤 · 主人互动模式",
             left + 180, top + 12, 0xFF82E7D5, false);
         inputSurface(graphics, commandBox);

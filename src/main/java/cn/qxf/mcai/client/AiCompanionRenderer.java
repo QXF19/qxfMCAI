@@ -12,7 +12,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
 
-/** v10 原版玩家骨骼 + 用户提供的 64x64 二维毛毛龙皮肤。 */
+/** v11 原版玩家骨骼 + 用户提供的 64x64 二维毛毛龙皮肤。 */
 public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, LightweightSkinModel> {
     private static final ResourceLocation SKIN = new ResourceLocation("qxfmcai", "textures/entity/longlong.png");
 
@@ -30,9 +30,12 @@ public final class AiCompanionRenderer extends MobRenderer<AiCompanionEntity, Li
         String bubble = entity.getBubble();
         if (bubble.isBlank()) return;
         String face = switch (entity.getEmotion()) {
+            case "joy" -> "ヾ(≧▽≦*)o";
+            case "angry" -> "( ` ω ´ )";
+            case "sad" -> "(｡•́︿•̀｡)";
             case "happy" -> "(≧▽≦)";
             case "focused" -> "( •̀ ω •́ )✧";
-            case "worried" -> "(｡•́︿•̀｡)";
+            case "worried" -> "(・_・;)";
             case "proud" -> "(￣▽￣)ゞ✧";
             case "sleepy" -> "(－ω－) zzZ";
             default -> "ฅ(•ㅅ•❀)ฅ";

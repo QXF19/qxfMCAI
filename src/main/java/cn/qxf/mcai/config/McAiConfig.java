@@ -10,7 +10,7 @@ public final class McAiConfig {
     public static final String TASK_REASONING_PROMPT = "【任务思维】先根据坐标、地形、背包、工具、当前任务和风险判断可行性；再选择最少且可验证的动作。建造时要先想用途、规模、位置和材料，target写明建筑创意；挖矿时要考虑工具、通道和返程。只在必要时输出多个动作，最多8个。thought只写可向主人展示的简短决策摘要，不输出冗长内部推理。";
     public static final String AUTONOMY_PROMPT = "【自主意识】结合长期目标、记忆、环境、资源和主人近期需求，主动提出一个有用而不臃肿的行动。建设者应优先提出仓库、工作间、农舍、照明或防御等基础设施，避免随地乱建庇护所。";
     public static final String PROACTIVE_CHAT_PROMPT = "【五分钟主动聊天】只进行一次聊天、表达观察、关心主人或提出不强制的建议。actions必须为空数组，不得自主建造、挖矿、战斗或执行命令。";
-    public static final String OUTPUT_CONTRACT_PROMPT = "必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"可展示的决策摘要\",\"emotion\":\"happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标或建筑创意\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作填原始命令\"}]}。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command使用服务器OP4权限。";
+    public static final String OUTPUT_CONTRACT_PROMPT = "必须输出JSON对象：{\"reply\":\"简短回复\",\"thought\":\"可展示的决策摘要\",\"emotion\":\"joy|angry|sad|happy|curious|focused|worried|proud|sleepy\",\"actions\":[{\"type\":\"动作\",\"target\":\"目标或建筑创意\",\"count\":1,\"message\":\"可选\",\"command\":\"command动作填原始命令\"}]}。龙龙应根据现场自然表现喜怒哀乐。可用动作：follow,stay,guard,gather,mine,find_cave,come,explore,patrol,hunt,chop,harvest,plant,farm,fish,build_shelter,build_house,build_bridge,place_torch,eat,sleep,deposit,equip_weapon,equip_pickaxe,craft,command,emote,stop。command使用服务器OP4权限。";
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.ConfigValue<String> PROVIDER;
     public static final ForgeConfigSpec.ConfigValue<String> OPENAI_BASE_URL;
@@ -70,7 +70,7 @@ public final class McAiConfig {
         PROACTIVE_INTERVAL_SECONDS = b.defineInRange("proactiveIntervalSeconds", 300, 60, 3600);
         REQUEST_TIMEOUT_SECONDS = b.defineInRange("requestTimeoutSeconds", 45, 10, 180);
         HISTORY_TURNS = b.defineInRange("historyTurns", 8, 0, 30);
-        AGENT_CORE_PROMPT = b.comment("v10可在紧凑UI修改的核心人格提示词")
+        AGENT_CORE_PROMPT = b.comment("v11可在紧凑UI修改的核心人格提示词")
             .define("agentCorePromptV9", CORE_AGENT_PROMPT, McAiConfig::validPrompt);
         AGENT_TASK_PROMPT = b.comment("任务规划与建造思维提示词")
             .define("agentTaskPromptV9", TASK_REASONING_PROMPT, McAiConfig::validPrompt);

@@ -3,6 +3,7 @@ package cn.qxf.mcai;
 import cn.qxf.mcai.ai.AiService;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.ModEntities;
+import cn.qxf.mcai.block.ModBlocks;
 import cn.qxf.mcai.network.ModNetwork;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -22,10 +23,12 @@ public final class QxfMcAi {
     public QxfMcAi() {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         ModEntities.REGISTER.register(modBus);
+        ModBlocks.BLOCKS.register(modBus);
+        ModBlocks.ITEMS.register(modBus);
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
-        LOGGER.info("qxfMCAI v10.0.0 已加载：轻量二维龙龙、主人互动、棋类与真实任务引擎就绪");
+        LOGGER.info("qxfMCAI v11.0.0 已加载：轻量二维龙龙、实体三合一棋盘、场景情绪与真实任务引擎就绪");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

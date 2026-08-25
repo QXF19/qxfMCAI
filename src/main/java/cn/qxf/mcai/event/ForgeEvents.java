@@ -2,6 +2,7 @@ package cn.qxf.mcai.event;
 
 import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AiService;
+import cn.qxf.mcai.block.ModBlocks;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.server.CompanionManager;
 import cn.qxf.mcai.server.McAiCommands;
@@ -11,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -38,12 +40,13 @@ public final class ForgeEvents {
 
     private static String extractPrompt(String raw) {
         String text = raw.trim();
-        String[] prefixes = {"@龙龙 ", "@龙龙，", "@龙龙,", "龙龙 ", "龙龙，", "龙龙,",
+        String[] prefixes = {"U：", "U:", "U ", "u：", "u:", "u ",
+            "@龙龙 ", "@龙龙，", "@龙龙,", "龙龙 ", "龙龙，", "龙龙,",
             "@龍龍 ", "龍龍，", "龍龍,"};
         for (String prefix : prefixes) {
             if (text.startsWith(prefix)) return text.substring(prefix.length()).trim();
         }
-        if (text.equals("@龙龙") || text.equals("龙龙") || text.equals("龍龍"))
+        if (text.equalsIgnoreCase("U") || text.equals("@龙龙") || text.equals("龙龙") || text.equals("龍龍"))
             return "主人在叫你。请自然称呼主人，结合自己的当前想法主动回应，并询问或建议一件可以真正执行的事情。";
         return null;
     }
@@ -68,7 +71,7 @@ public final class ForgeEvents {
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI v10] 龙龙已换用轻量二维皮肤；按 M 打开紧凑控制台。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v11] 轻量二维龙龙与三合一实体棋盘已就绪；按 M 打开控制台。")
                 .withStyle(ChatFormatting.AQUA));
         }
     }
@@ -76,5 +79,21 @@ public final class ForgeEvents {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         LAST_PROACTIVE.remove(event.getEntity().getUUID());
+    }
+
+    @SubscribeEvent
+    public static void onBoardPlaced(BlockEvent.EntityPlaceEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player) || !event.getPlacedBlock().is(ModBlocks.DRAGON_GAME_BOARD.get())) return;
+        var companion = CompanionManager.find(player);
+        if (companion != null)
+            companion.reactToOwnerAction("主人放置了属于我们的实体棋盘", "happy", "棋盘摆好啦，主人想先玩哪一种？");
+    }
+
+    @SubscribeEvent
+    public static void onBoardBroken(BlockEvent.BreakEvent event) {
+        if (!(event.getPlayer() instanceof ServerPlayer player) || !event.getState().is(ModBlocks.DRAGON_GAME_BOARD.get())) return;
+        var companion = CompanionManager.find(player);
+        if (companion != null)
+            companion.reactToOwnerAction("主人拆掉了属于我们的实体棋盘", "sad", "棋盘被收起来了……下次再陪主人玩。");
     }
 }

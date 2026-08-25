@@ -12,6 +12,15 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -63,12 +72,13 @@ public final class AiService {
     public static void ask(ServerPlayer player, String prompt, boolean proactive) {
         init();
         UUID playerId = player.getUUID();
+        AiCompanionEntity initialRelationship = proactive ? null : CompanionManager.find(player);
+        boolean relationshipExisted = initialRelationship != null;
         if (!proactive) {
-            AiCompanionEntity relationship = CompanionManager.find(player);
             // 聊天只发展已建立的关系；召唤必须由 /mcai summon 或明确任务触发。
-            if (relationship != null) {
-                relationship.addFavorability(McAiConfig.CHAT_FAVORABILITY_GAIN.get());
-                relationship.remember("主人主动和我交流：" + prompt);
+            if (initialRelationship != null) {
+                initialRelationship.addFavorability(McAiConfig.CHAT_FAVORABILITY_GAIN.get());
+                initialRelationship.reactToOwnerWords(prompt);
             }
         }
         // API 优先生成计划，本地规划器只负责验证玩家意图并在模型漏动作、坏 JSON 或超时时保底。
@@ -132,15 +142,15 @@ public final class AiService {
                         return;
                     }
                     if (!livePlayer.isAlive()) return;
-                    livePlayer.sendSystemMessage(Component.literal("<龙龙> " + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
+                    livePlayer.sendSystemMessage(Component.literal("AI·龙龙：" + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
                     AiCompanionEntity companion = CompanionManager.find(livePlayer);
                     // 玩家明确交付了任务时，任务本身就是召唤许可；不能让一份有效的 API 计划
                     // 因为龙龙尚未生成而静默丢失。普通聊天仍不会隐式召唤。
                     if (taskRequest && companion == null) companion = CompanionManager.summon(livePlayer);
                     if (companion != null) {
+                        if (!proactive && !relationshipExisted) companion.reactToOwnerWords(prompt);
                         companion.speak(reply.text(), reply.emotion());
                         companion.setThought(reply.thought());
-                        companion.remember("主人说：" + prompt);
                         companion.remember("龙龙回应：" + reply.text());
                     }
                     List<AgentAction> resolvedActions = proactive ? List.of()
@@ -165,7 +175,7 @@ public final class AiService {
         String reply = prompt.contains("怎么") || prompt.contains("建议")
             ? "主人，API 暂时不可用，但我仍会观察当前状态。可以直接交给我挖矿、建造、农田或战斗任务。"
             : "主人，我在呢。API 断开时我仍能真正执行生存任务，等连接恢复后会继续完整思考。";
-        player.sendSystemMessage(Component.literal("<龙龙> " + reply).withStyle(ChatFormatting.LIGHT_PURPLE));
+        player.sendSystemMessage(Component.literal("AI·龙龙：" + reply).withStyle(ChatFormatting.LIGHT_PURPLE));
         if (companion != null) companion.speak(reply, "curious");
     }
 
@@ -312,7 +322,36 @@ public final class AiService {
             + "，生命=" + Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth())
             + "，饱食度=" + player.getFoodData().getFoodLevel() + "，坐标=" + player.blockPosition().getX()
             + "," + player.blockPosition().getY() + "," + player.blockPosition().getZ()
+            + "。场景=" + analyzeScene(player)
             + (companion == null ? "，龙龙尚未召唤" : "。" + companion.describeForAi());
+    }
+
+    private static String analyzeScene(ServerPlayer player) {
+        var level = player.serverLevel();
+        long time = Math.floorMod(level.getDayTime(), 24_000L);
+        String period = time < 1_000 ? "清晨" : time < 6_000 ? "上午" : time < 12_000 ? "下午"
+            : time < 13_000 ? "黄昏" : time < 23_000 ? "夜晚" : "黎明";
+        String biome = level.getBiome(player.blockPosition()).unwrapKey()
+            .map(key -> key.location().toString()).orElse("未知生物群系");
+        String weather = level.isThundering() ? "雷暴" : level.isRaining() ? "下雨" : "晴朗";
+        int light = level.getMaxLocalRawBrightness(player.blockPosition());
+        String below = level.getBlockState(player.blockPosition().below()).getBlock().getName().getString();
+
+        Vec3 eye = player.getEyePosition();
+        Vec3 end = eye.add(player.getLookAngle().scale(12.0D));
+        HitResult hit = level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE,
+            ClipContext.Fluid.NONE, player));
+        String looking = hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK
+            ? level.getBlockState(blockHit.getBlockPos()).getBlock().getName().getString() : "远处";
+
+        List<Entity> nearby = level.getEntities(player, new AABB(player.blockPosition()).inflate(16.0D),
+            entity -> entity.isAlive());
+        long hostiles = nearby.stream().filter(Monster.class::isInstance).count();
+        long animals = nearby.stream().filter(Animal.class::isInstance).count();
+        long drops = nearby.stream().filter(ItemEntity.class::isInstance).count();
+        return biome + "，" + period + "，" + weather + "，亮度=" + light + "，脚下=" + below
+            + "，主人正看向=" + looking + "，16格内敌对生物=" + hostiles + "、动物=" + animals
+            + "、掉落物=" + drops;
     }
 
     private static String readApiError(String body) {
