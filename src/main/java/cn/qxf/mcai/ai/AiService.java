@@ -4,376 +4,271 @@ import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.server.CompanionManager;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.google.gson.*;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.Vec3;
-
+import net.minecraft.world.phys.*;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 
+/** API 决策与游戏线程分离；回复必须持有有效请求凭证才能落地。 */
 public final class AiService {
-    private static final Set<String> ALLOWED_ACTIONS = Set.of(
-        "follow", "stay", "guard", "gather", "mine", "find_cave", "come", "explore", "patrol", "hunt", "chop",
-        "harvest", "plant", "farm", "fish", "build_shelter", "build_house", "build_bridge", "place_torch",
-        "eat", "sleep", "deposit", "equip_weapon", "equip_pickaxe", "craft", "command", "emote", "stop");
-    private static final Set<UUID> PENDING = new HashSet<>();
-    private static final Set<UUID> BACKGROUND_PENDING = new HashSet<>();
-    private static final java.util.Map<UUID, Deque<Message>> HISTORY = new java.util.concurrent.ConcurrentHashMap<>();
-    private static ExecutorService executor;
+    private static final Set<String> ALLOWED = Set.of("follow", "stay", "guard", "gather", "mine", "find_cave",
+        "come", "explore", "patrol", "hunt", "chop", "harvest", "plant", "farm", "fish", "build_shelter",
+        "build_house", "build_bridge", "place_torch", "eat", "sleep", "deposit", "equip_weapon", "equip_pickaxe",
+        "craft", "command", "emote", "stop");
+    private static final RequestLedger REQUESTS = new RequestLedger(4);
+    private static final Map<UUID, CompletableFuture<?>> TRANSPORT = new ConcurrentHashMap<>();
+    private static final Map<UUID, Deque<Message>> HISTORY = new ConcurrentHashMap<>();
+    private static final Map<UUID, String> STATUS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LATENCY = new ConcurrentHashMap<>();
     private static HttpClient client;
-
     private AiService() {}
 
     public static synchronized void init() {
-        if (executor != null) return;
-        executor = Executors.newFixedThreadPool(2, runnable -> {
-            Thread thread = new Thread(runnable, "qxfMCAI-API");
-            thread.setDaemon(true);
-            return thread;
-        });
-        client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).executor(executor)
-            .followRedirects(HttpClient.Redirect.NORMAL).build();
+        if (client == null) client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8))
+            .followRedirects(HttpClient.Redirect.NEVER).build();
     }
-
     public static boolean isConfigured() {
-        if (McAiConfig.baseUrl().isBlank() || McAiConfig.model().isBlank()) return false;
-        return McAiConfig.provider().equals("custom") || !McAiConfig.apiKey().isBlank();
+        return McAiConfig.SPEC.isLoaded() && !McAiConfig.baseUrl().isBlank() && !McAiConfig.model().isBlank()
+            && (McAiConfig.provider().equals("custom") || !McAiConfig.apiKey().isBlank());
+    }
+    public static String runtimeStatus(UUID owner) {
+        return STATUS.getOrDefault(owner, isConfigured() ? "待命 · API 已配置" : "离线 · 本地任务可用");
+    }
+    public static long lastLatencyMillis(UUID owner) { return LATENCY.getOrDefault(owner, 0L); }
+    public static void cancelPending(UUID owner) {
+        REQUESTS.cancel(owner);
+        var future = TRANSPORT.remove(owner);
+        if (future != null) future.cancel(true);
+        STATUS.put(owner, "已取消旧思考 · 待命");
+    }
+    public static void clearPlayer(UUID owner) {
+        cancelPending(owner);
+        HISTORY.remove(owner); STATUS.remove(owner); LATENCY.remove(owner);
+    }
+    public static synchronized void shutdown() {
+        REQUESTS.clear();
+        TRANSPORT.values().forEach(f -> f.cancel(true));
+        TRANSPORT.clear(); HISTORY.clear(); STATUS.clear(); LATENCY.clear(); client = null;
     }
 
     public static void ask(ServerPlayer player, String prompt, boolean proactive) {
-        init();
-        UUID playerId = player.getUUID();
-        AiCompanionEntity initialRelationship = proactive ? null : CompanionManager.find(player);
-        boolean relationshipExisted = initialRelationship != null;
-        if (!proactive) {
-            // 聊天只发展已建立的关系；召唤必须由 /mcai summon 或明确任务触发。
-            if (initialRelationship != null) {
-                initialRelationship.addFavorability(McAiConfig.CHAT_FAVORABILITY_GAIN.get());
-                initialRelationship.reactToOwnerWords(prompt);
-            }
-        }
-        // API 优先生成计划，本地规划器只负责验证玩家意图并在模型漏动作、坏 JSON 或超时时保底。
-        // 主动聊天是物理隔离的纯对话通道。提示词中的“不得建造/不得执行”也绝不能
-        // 被关键词保底误识别为玩家下达了建造或命令任务。
-        List<AgentAction> localFallbackActions = proactive ? List.of() : LocalTaskPlanner.plan(prompt);
-        boolean taskRequest = !proactive && !localFallbackActions.isEmpty();
-        if (taskRequest && !isConfigured()) {
-            CompanionManager.applyActions(player, localFallbackActions);
-            if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] API 不可用，已启用安全保底并立即执行："
-                    + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
-            return;
-        }
-        synchronized (PENDING) {
-            if (PENDING.contains(playerId)) {
-                if (taskRequest) {
-                    CompanionManager.applyActions(player, localFallbackActions);
-                    if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] AI 正在处理上一次思考，本次任务已用本地保底执行："
-                        + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
-                } else if (!proactive) player.sendSystemMessage(Component.literal("[龙龙] 我正在认真回应上一句话。")
-                        .withStyle(ChatFormatting.LIGHT_PURPLE));
-                return;
-            }
-            if (!isConfigured()) {
-                if (!proactive) offlineChat(player, prompt);
-                return;
-            }
-            PENDING.add(playerId);
-        }
-
-        String modePrompt = proactive ? McAiConfig.proactiveChatPrompt()
-            : taskRequest ? McAiConfig.taskPrompt() : "【对话】结合现场和记忆自然回应，不要虚构已执行任务。";
-        String contextPrompt = prompt + "\n\n" + modePrompt + "\n\n当前游戏状态：" + gameContext(player);
-        if (!proactive) player.sendSystemMessage(Component.literal(taskRequest
-                ? "[龙龙] AI 正在结合现场生成可执行计划……"
-                : "[龙龙] 让我观察一下，再认真回应……").withStyle(ChatFormatting.DARK_GRAY));
-
-        MinecraftServer server = player.getServer();
-        if (server == null) {
-            synchronized (PENDING) { PENDING.remove(playerId); }
-            return;
-        }
-        CompletableFuture<ParsedReply> requestFuture = CompletableFuture.supplyAsync(() -> request(playerId, contextPrompt), executor);
-        if (taskRequest) requestFuture = requestFuture.orTimeout(Math.min(15, McAiConfig.REQUEST_TIMEOUT_SECONDS.get()), TimeUnit.SECONDS);
-        requestFuture
-            .whenComplete((reply, error) -> {
-                server.execute(() -> {
-                    synchronized (PENDING) { PENDING.remove(playerId); }
-                    ServerPlayer livePlayer = server.getPlayerList().getPlayer(playerId);
-                    if (livePlayer == null) return;
-                    if (error != null) {
-                        if (taskRequest && !proactive) {
-                            CompanionManager.applyActions(livePlayer, localFallbackActions);
-                            livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] AI 规划超时或失败，已无缝切换本地执行："
-                                + LocalTaskPlanner.summary(localFallbackActions)).withStyle(ChatFormatting.YELLOW));
-                        } else if (proactive) {
-                            AiCompanionEntity companion = CompanionManager.find(livePlayer);
-                            if (companion != null) companion.proactiveLocalMessage();
-                        } else livePlayer.sendSystemMessage(Component.literal("[qxfMCAI] 聊天请求失败：" + safeError(error))
-                            .withStyle(ChatFormatting.RED));
-                        return;
-                    }
-                    if (!livePlayer.isAlive()) return;
-                    livePlayer.sendSystemMessage(Component.literal("AI·龙龙：" + reply.text()).withStyle(ChatFormatting.LIGHT_PURPLE));
-                    AiCompanionEntity companion = CompanionManager.find(livePlayer);
-                    // 玩家明确交付了任务时，任务本身就是召唤许可；不能让一份有效的 API 计划
-                    // 因为龙龙尚未生成而静默丢失。普通聊天仍不会隐式召唤。
-                    if (taskRequest && companion == null) companion = CompanionManager.summon(livePlayer);
-                    if (companion != null) {
-                        if (!proactive && !relationshipExisted) companion.reactToOwnerWords(prompt);
-                        companion.speak(reply.text(), reply.emotion());
-                        companion.setThought(reply.thought());
-                        companion.remember("龙龙回应：" + reply.text());
-                    }
-                    List<AgentAction> resolvedActions = proactive ? List.of()
-                        : mergeRequiredActions(reply.actions(), localFallbackActions, taskRequest);
-                    if (companion != null) {
-                        CompanionManager.applyActions(livePlayer, resolvedActions);
-                        if (taskRequest && !resolvedActions.isEmpty())
-                            livePlayer.sendSystemMessage(Component.literal("[龙龙] AI 计划已下发：" + LocalTaskPlanner.summary(resolvedActions))
-                                .withStyle(ChatFormatting.GREEN));
-                    } else if (!resolvedActions.isEmpty() && !proactive) {
-                        livePlayer.sendSystemMessage(Component.literal(
-                            "[qxfMCAI] 当前无法生成龙龙，AI 规划已保留，请检查实体生成空间。")
-                            .withStyle(ChatFormatting.YELLOW));
-                    }
-                    if (resolvedActions.isEmpty()) QxfMcAi.LOGGER.info("龙龙将本次输入识别为纯聊天：{}", prompt);
-                });
-            });
-    }
-
-    private static void offlineChat(ServerPlayer player, String prompt) {
+        if (player.getServer() == null || !player.isAlive()) return;
+        prompt = bounded(prompt, 512).trim();
+        if (prompt.isEmpty()) return;
+        String control = proactive ? "" : IntentPolicy.control(prompt);
+        if (!control.isEmpty()) { immediateControl(player, control); return; }
+        UUID owner = player.getUUID();
+        if (proactive && REQUESTS.pending(owner)) return;
+        if (!proactive && REQUESTS.pending(owner)) cancelPending(owner);
         AiCompanionEntity companion = CompanionManager.find(player);
-        String reply = prompt.contains("怎么") || prompt.contains("建议")
-            ? "主人，API 暂时不可用，但我仍会观察当前状态。可以直接交给我挖矿、建造、农田或战斗任务。"
-            : "主人，我在呢。API 断开时我仍能真正执行生存任务，等连接恢复后会继续完整思考。";
-        player.sendSystemMessage(Component.literal("AI·龙龙：" + reply).withStyle(ChatFormatting.LIGHT_PURPLE));
-        if (companion != null) companion.speak(reply, "curious");
-    }
-
-    /** 保留 API 的行动顺序，同时保证玩家明确要求的任务类型没有被模型漏掉。 */
-    private static List<AgentAction> mergeRequiredActions(List<AgentAction> planned,
-                                                           List<AgentAction> required,
-                                                           boolean taskRequest) {
-        if (!taskRequest) return planned.stream().limit(8).toList();
-        List<AgentAction> merged = new ArrayList<>(planned.stream().limit(8).toList());
-        for (AgentAction fallback : required) {
-            boolean covered = merged.stream().anyMatch(action -> action.type().equals(fallback.type()));
-            if (!covered && merged.size() < 8) merged.add(fallback);
+        if (!proactive && companion != null) {
+            companion.addFavorability(McAiConfig.CHAT_FAVORABILITY_GAIN.get());
+            companion.reactToOwnerWords(prompt);
         }
-        return List.copyOf(merged);
+        List<AgentAction> fallback = proactive ? List.of() : LocalTaskPlanner.plan(prompt);
+        boolean task = !proactive && IntentPolicy.requestsTask(prompt, fallback);
+        if (!isConfigured()) { offline(player, fallback, task, proactive); return; }
+        String mode = proactive ? McAiConfig.proactiveChatPrompt() : task ? McAiConfig.taskPrompt()
+            : "【仅对话】回答主人的问题，actions必须为空数组，不执行任何任务。";
+        String context = prompt + "\n" + mode + "\n现场：" + gameContext(player);
+        if (!proactive) tell(player, task ? "正在观察现场并规划，主人可随时暂停或取消。" : "正在结合现场回应主人……", ChatFormatting.DARK_GRAY);
+        submit(player, prompt, context, fallback, task, proactive, "", -1);
     }
 
-    /** 执行期间的低频 AI 观察环：进度、失败和完成都会回到同一个智能体上下文。 */
+    private static void immediateControl(ServerPlayer player, String control) {
+        cancelPending(player.getUUID());
+        AiCompanionEntity companion = CompanionManager.find(player);
+        if (control.equals("pause") || control.equals("resume")) {
+            if (companion == null) { tell(player, "尚未召唤龙龙，没有可暂停的任务。", ChatFormatting.YELLOW); return; }
+            companion.setTaskPaused(control.equals("pause"));
+            tell(player, control.equals("pause") ? "已暂停行动，保留当前进度和队列。" : "已恢复任务。", ChatFormatting.AQUA);
+            return;
+        }
+        if (control.equals("stop") && companion == null) {
+            tell(player, "已取消待处理的 AI 请求。", ChatFormatting.AQUA); return;
+        }
+        CompanionManager.applyActions(player, List.of(AgentAction.simple(control)));
+        tell(player, "已立即执行：" + LocalTaskPlanner.summary(List.of(AgentAction.simple(control))), ChatFormatting.AQUA);
+    }
+
+    /** 复盘更新想法；只有空闲自主决策才允许生成有限行动，完成回顾不重复任务。 */
     public static void reviewAgentState(ServerPlayer player, String phase, String details, boolean allowActions) {
-        if (!isConfigured() || player.getServer() == null) return;
+        if (!isConfigured() || player.getServer() == null || REQUESTS.pending(player.getUUID())) return;
+        var companion = CompanionManager.find(player);
+        if (companion == null || companion.isTaskPaused()) return;
+        boolean autonomous = phase.equals("AI自主决策") && allowActions;
+        String context = "【" + phase + "】" + bounded(details, 2200) + "\n"
+            + (autonomous ? McAiConfig.autonomyPrompt() : McAiConfig.taskPrompt())
+            + (autonomous ? "\n仅选择一项能独立完成的非建造行动；可以空动作提出建议。不得执行命令或新建建筑。"
+                : "\n只根据真实结果提出一个简短建议，不声称新任务已完成。actions必须为空数组。");
+        submit(player, "", context, List.of(), false, true, phase, companion.getTaskRevision());
+    }
+
+    private static void submit(ServerPlayer player, String userText, String context, List<AgentAction> fallback,
+                               boolean task, boolean quiet, String phase, long revision) {
         init();
-        UUID playerId = player.getUUID();
-        synchronized (BACKGROUND_PENDING) {
-            if (BACKGROUND_PENDING.contains(playerId)) return;
-            synchronized (PENDING) { if (PENDING.contains(playerId)) return; }
-            BACKGROUND_PENDING.add(playerId);
+        UUID owner = player.getUUID();
+        long ticket = REQUESTS.begin(owner);
+        if (ticket < 0) {
+            STATUS.put(owner, "API繁忙 · 本地保底");
+            if (phase.isEmpty()) offline(player, fallback, task, quiet);
+            return;
         }
-        MinecraftServer server = player.getServer();
-        String prompt = "【智能体运行阶段：" + phase + "】\n" + details + "\n"
-            + ("AI自主决策".equals(phase) ? McAiConfig.autonomyPrompt() : McAiConfig.taskPrompt())
-            + "\n请基于真实进度更新想法。只有需要调整计划时才输出 actions。";
-        CompletableFuture.supplyAsync(() -> request(playerId, prompt), executor)
-            .orTimeout(Math.min(20, McAiConfig.REQUEST_TIMEOUT_SECONDS.get()), TimeUnit.SECONDS)
-            .whenComplete((reply, error) -> server.execute(() -> {
-                synchronized (BACKGROUND_PENDING) { BACKGROUND_PENDING.remove(playerId); }
-                ServerPlayer livePlayer = server.getPlayerList().getPlayer(playerId);
-                if (livePlayer == null) return;
+        var server = player.server;
+        var dimension = player.level().dimension();
+        var relationship = CompanionManager.find(player);
+        UUID companionId = relationship == null ? null : relationship.getUUID();
+        long started = System.nanoTime();
+        STATUS.put(owner, task ? "AI规划中" : quiet ? "观察与复盘中" : "正在回应");
+        int timeout = McAiConfig.REQUEST_TIMEOUT_SECONDS.get();
+        // 所有配置、游戏现场和历史在服务端线程快照；网络线程只处理字节与 JSON。
+        JsonObject body = new JsonObject();
+        body.addProperty("model", McAiConfig.model()); body.addProperty("stream", false);
+        JsonArray messages = new JsonArray();
+        messages.add(message("system", McAiConfig.systemPrompt()));
+        for (Message old : HISTORY.getOrDefault(owner, new ArrayDeque<>())) messages.add(message(old.role, old.content));
+        messages.add(message("user", context)); body.add("messages", messages);
+        CompletableFuture<HttpResponse<String>> wire;
+        try {
+            String base = McAiConfig.baseUrl().trim().replaceAll("/+$", "");
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(base.endsWith("/chat/completions") ? base : base + "/chat/completions"))
+                .timeout(Duration.ofSeconds(timeout)).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8));
+            String key = McAiConfig.apiKey();
+            if (!key.isBlank()) request.header("Authorization", "Bearer " + key);
+            wire = client.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (RuntimeException error) {
+            REQUESTS.complete(owner, ticket); STATUS.put(owner, "接口配置无效");
+            if (phase.isEmpty()) offline(player, fallback, task, quiet);
+            return;
+        }
+        TRANSPORT.put(owner, wire);
+        CompletableFuture<ParsedReply> parsed = wire.thenApply(response -> {
+            if (response.statusCode() < 200 || response.statusCode() >= 300)
+                throw new IllegalStateException("HTTP " + response.statusCode());
+            if (response.body().length() > 131072) throw new IllegalStateException("响应过长");
+            var root = JsonParser.parseString(response.body()).getAsJsonObject();
+            return parseReply(root.getAsJsonArray("choices").get(0).getAsJsonObject()
+                .getAsJsonObject("message").get("content").getAsString());
+        }).orTimeout(timeout, TimeUnit.SECONDS);
+        parsed.whenComplete((reply, error) -> {
+            if (error != null) wire.cancel(true);
+            server.execute(() -> {
+                if (!REQUESTS.complete(owner, ticket)) return;
+                TRANSPORT.remove(owner, wire);
+                LATENCY.put(owner, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+                ServerPlayer live = server.getPlayerList().getPlayer(owner);
+                if (live != player || !live.isAlive() || live.level().dimension() != dimension) {
+                    STATUS.put(owner, "现场已改变 · 丢弃旧计划"); return;
+                }
+                var current = CompanionManager.find(live);
+                if (companionId != null && (current == null || !companionId.equals(current.getUUID()))) {
+                    STATUS.put(owner, "伙伴已改变 · 丢弃旧计划"); return;
+                }
+                if (revision >= 0 && (current == null || current.getTaskRevision() != revision || current.isTaskPaused())) {
+                    STATUS.put(owner, "任务已更新 · 丢弃旧复盘"); return;
+                }
                 if (error != null) {
-                    QxfMcAi.LOGGER.warn("龙龙 AI 运行阶段回顾失败：phase={} error={}", phase, safeError(error));
+                    STATUS.put(owner, "API失败或超时 · 可重试");
+                    QxfMcAi.LOGGER.warn("龙龙 AI 请求失败（不记录响应正文）：{}", error.getClass().getSimpleName());
+                    if (phase.isEmpty()) offline(live, fallback, task, quiet);
                     return;
                 }
-                AiCompanionEntity companion = CompanionManager.find(livePlayer);
-                if (companion == null) return;
-                companion.setThought(reply.thought());
-                companion.remember(phase + "：" + reply.text());
-                if (!reply.text().isBlank()) companion.speak(reply.text(), reply.emotion());
-                List<AgentAction> adjustments = allowActions ? reply.actions().stream().limit(4).toList() : List.of();
-                if (!adjustments.isEmpty()) {
-                    CompanionManager.applyActions(livePlayer, adjustments);
-                    livePlayer.sendSystemMessage(Component.literal("[龙龙·AI调整] " + reply.text())
-                        .withStyle(ChatFormatting.AQUA));
-                } else if (!"任务进度".equals(phase)) {
-                    livePlayer.sendSystemMessage(Component.literal("<龙龙> " + reply.text())
-                        .withStyle(ChatFormatting.LIGHT_PURPLE));
+                STATUS.put(owner, "已回应 · 待命");
+                boolean autonomous = phase.equals("AI自主决策");
+                List<AgentAction> actions = IntentPolicy.resolve(reply.actions, fallback, task || autonomous);
+                if (autonomous) actions = actions.stream().filter(a ->
+                    !a.type().startsWith("build_") && !a.type().equals("command") && !a.type().equals("stop"))
+                    .limit(1).toList();
+                if (!actions.isEmpty()) CompanionManager.applyActions(live, actions);
+                if (!actions.isEmpty() && autonomous) STATUS.put(owner, "已启动自主行动：" + LocalTaskPlanner.summary(actions));
+                current = CompanionManager.find(live);
+                if (current != null) {
+                    current.speak(reply.text, reply.emotion); current.setThought(reply.thought);
+                    current.remember("龙龙：" + bounded(reply.text, 200));
                 }
-            }));
+                if (!phase.equals("任务进度") && !reply.text.isBlank())
+                    live.sendSystemMessage(Component.literal("AI·龙龙：" + reply.text).withStyle(ChatFormatting.LIGHT_PURPLE));
+                if (task) tell(live, actions.isEmpty() ? "本次没有有效执行计划，请说明目标与数量。"
+                    : "已提交任务队列：" + LocalTaskPlanner.summary(actions), actions.isEmpty() ? ChatFormatting.YELLOW : ChatFormatting.GREEN);
+                if (!userText.isBlank() && !quiet) remember(owner, userText, reply.text);
+            });
+        });
     }
 
-    private static ParsedReply request(UUID playerId, String prompt) {
+    private static void offline(ServerPlayer player, List<AgentAction> actions, boolean task, boolean proactive) {
+        var companion = CompanionManager.find(player);
+        if (task && !actions.isEmpty()) {
+            CompanionManager.applyActions(player, actions);
+            tell(player, "API暂不可用，已提交本地任务：" + LocalTaskPlanner.summary(actions), ChatFormatting.YELLOW);
+        } else if (proactive && companion != null) companion.proactiveLocalMessage();
+        else tell(player, task ? "API暂不可用，这项复杂任务还不能生成有效计划。主人可重试或明确目标。"
+            : "主人，我在。API暂不可用，仍可跟随、暂停，或执行明确的挖矿、伐木等任务。", ChatFormatting.LIGHT_PURPLE);
+    }
+    private static void tell(ServerPlayer player, String text, ChatFormatting color) {
+        player.sendSystemMessage(Component.literal("[龙龙] " + text).withStyle(color));
+    }
+    private static JsonObject message(String role, String text) {
+        JsonObject value = new JsonObject(); value.addProperty("role", role); value.addProperty("content", text); return value;
+    }
+    static ParsedReply parseReply(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.startsWith("```")) text = text.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
         try {
-            JsonObject body = new JsonObject();
-            body.addProperty("model", McAiConfig.model());
-            body.addProperty("stream", false);
-            JsonObject responseFormat = new JsonObject();
-            responseFormat.addProperty("type", "json_object");
-            body.add("response_format", responseFormat);
-            JsonArray messages = new JsonArray();
-            messages.add(messageJson("system", McAiConfig.systemPrompt()));
-            Deque<Message> history = HISTORY.computeIfAbsent(playerId, ignored -> new ArrayDeque<>());
-            synchronized (history) {
-                for (Message old : history) messages.add(messageJson(old.role(), old.content()));
-            }
-            messages.add(messageJson("user", prompt));
-            body.add("messages", messages);
-
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint()))
-                .timeout(Duration.ofSeconds(McAiConfig.REQUEST_TIMEOUT_SECONDS.get()))
-                .header("Content-Type", "application/json").header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8));
-            if (!McAiConfig.apiKey().isBlank()) builder.header("Authorization", "Bearer " + McAiConfig.apiKey());
-            HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() < 200 || response.statusCode() >= 300)
-                throw new IllegalStateException("HTTP " + response.statusCode() + "：" + readApiError(response.body()));
-            JsonObject root = JsonParser.parseString(response.body().trim()).getAsJsonObject();
-            String content = root.getAsJsonArray("choices").get(0).getAsJsonObject()
-                .getAsJsonObject("message").get("content").getAsString();
-            ParsedReply parsed = parseReply(content);
-            remember(history, prompt, parsed.text());
-            return parsed;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("请求已中断");
-        } catch (Exception e) {
-            throw new IllegalStateException(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage(), e);
-        }
-    }
-
-    private static JsonObject messageJson(String role, String content) {
-        JsonObject message = new JsonObject();
-        message.addProperty("role", role);
-        message.addProperty("content", content);
-        return message;
-    }
-
-    private static ParsedReply parseReply(String raw) {
-        String clean = raw.trim();
-        if (clean.startsWith("```")) clean = clean.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
-        try {
-            JsonObject object = JsonParser.parseString(clean).getAsJsonObject();
-            String text = object.has("reply") ? object.get("reply").getAsString() : "我知道啦。";
-            String thought = object.has("thought") ? object.get("thought").getAsString() : "在认真理解主人的需要";
-            String emotion = object.has("emotion") ? object.get("emotion").getAsString() : "curious";
-            List<AgentAction> actions = new ArrayList<>();
+            JsonObject object = JsonParser.parseString(text).getAsJsonObject();
+            var actions = new ArrayList<AgentAction>();
             if (object.has("actions") && object.get("actions").isJsonArray()) {
-                for (JsonElement element : object.getAsJsonArray("actions")) {
-                    AgentAction action = AgentAction.fromJson(element);
-                    if (ALLOWED_ACTIONS.contains(action.type())) actions.add(action);
+                for (var value : object.getAsJsonArray("actions")) {
+                    AgentAction action = AgentAction.fromJson(value);
+                    if (actions.size() < 8 && ALLOWED.contains(action.type())) actions.add(action);
                 }
             }
-            return new ParsedReply(text.isBlank() ? "我在呢。" : text, thought, emotion, List.copyOf(actions));
-        } catch (Exception ignored) {
-            return new ParsedReply(clean.isBlank() ? "我在呢。" : clean, "正在理解这句话", "curious", List.of());
+            return new ParsedReply(field(object, "reply", "主人，我在。", 1000),
+                field(object, "thought", "正在观察现场", 256), field(object, "emotion", "curious", 32), List.copyOf(actions));
+        } catch (RuntimeException ignored) {
+            return new ParsedReply(text.startsWith("{") ? "主人，计划格式有误，已检查可执行的保底任务。"
+                : bounded(text.isBlank() ? "主人，我在。" : text, 1000), "正在理解主人的要求", "curious", List.of());
         }
     }
-
-    private static void remember(Deque<Message> history, String user, String assistant) {
-        int maxMessages = McAiConfig.HISTORY_TURNS.get() * 2;
-        if (maxMessages <= 0) return;
-        synchronized (history) {
-            history.addLast(new Message("user", user));
-            history.addLast(new Message("assistant", assistant));
-            while (history.size() > maxMessages) history.removeFirst();
-        }
+    private static String field(JsonObject o, String key, String fallback, int max) {
+        return o.has(key) && o.get(key).isJsonPrimitive() ? bounded(o.get(key).getAsString(), max) : fallback;
     }
-
-    private static String endpoint() {
-        String base = McAiConfig.baseUrl().trim();
-        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-        return base.endsWith("/chat/completions") ? base : base + "/chat/completions";
+    private static String bounded(String text, int max) { return text == null ? "" : text.substring(0, Math.min(max, text.length())); }
+    private static void remember(UUID owner, String user, String reply) {
+        int limit = Math.min(12, McAiConfig.HISTORY_TURNS.get() * 2);
+        var history = HISTORY.computeIfAbsent(owner, id -> new ArrayDeque<>());
+        history.addLast(new Message("user", bounded(user, 512)));
+        history.addLast(new Message("assistant", bounded(reply, 700)));
+        while (history.size() > limit) history.removeFirst();
     }
-
     private static String gameContext(ServerPlayer player) {
-        AiCompanionEntity companion = CompanionManager.find(player);
-        return "主人账号=" + player.getGameProfile().getName() + "，维度=" + player.level().dimension().location()
-            + "，生命=" + Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth())
-            + "，饱食度=" + player.getFoodData().getFoodLevel() + "，坐标=" + player.blockPosition().getX()
-            + "," + player.blockPosition().getY() + "," + player.blockPosition().getZ()
-            + "。场景=" + analyzeScene(player)
-            + (companion == null ? "，龙龙尚未召唤" : "。" + companion.describeForAi());
-    }
-
-    private static String analyzeScene(ServerPlayer player) {
+        var companion = CompanionManager.find(player);
         var level = player.serverLevel();
-        long time = Math.floorMod(level.getDayTime(), 24_000L);
-        String period = time < 1_000 ? "清晨" : time < 6_000 ? "上午" : time < 12_000 ? "下午"
-            : time < 13_000 ? "黄昏" : time < 23_000 ? "夜晚" : "黎明";
-        String biome = level.getBiome(player.blockPosition()).unwrapKey()
-            .map(key -> key.location().toString()).orElse("未知生物群系");
-        String weather = level.isThundering() ? "雷暴" : level.isRaining() ? "下雨" : "晴朗";
-        int light = level.getMaxLocalRawBrightness(player.blockPosition());
-        String below = level.getBlockState(player.blockPosition().below()).getBlock().getName().getString();
-
-        Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getLookAngle().scale(12.0D));
-        HitResult hit = level.clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE,
-            ClipContext.Fluid.NONE, player));
-        String looking = hit instanceof BlockHitResult blockHit && hit.getType() == HitResult.Type.BLOCK
-            ? level.getBlockState(blockHit.getBlockPos()).getBlock().getName().getString() : "远处";
-
-        List<Entity> nearby = level.getEntities(player, new AABB(player.blockPosition()).inflate(16.0D),
-            entity -> entity.isAlive());
-        long hostiles = nearby.stream().filter(Monster.class::isInstance).count();
-        long animals = nearby.stream().filter(Animal.class::isInstance).count();
-        long drops = nearby.stream().filter(ItemEntity.class::isInstance).count();
-        return biome + "，" + period + "，" + weather + "，亮度=" + light + "，脚下=" + below
-            + "，主人正看向=" + looking + "，16格内敌对生物=" + hostiles + "、动物=" + animals
-            + "、掉落物=" + drops;
+        List<Entity> nearby = level.getEntities(player, player.getBoundingBox().inflate(16), Entity::isAlive);
+        HitResult hit = level.clip(new ClipContext(player.getEyePosition(), player.getEyePosition().add(player.getLookAngle().scale(12)),
+            ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        String looking = hit instanceof BlockHitResult block && hit.getType() == HitResult.Type.BLOCK
+            ? level.getBlockState(block.getBlockPos()).getBlock().getName().getString() : "远处";
+        return "主人=" + player.getGameProfile().getName() + "；坐标=" + player.blockPosition().toShortString()
+            + "；维度=" + level.dimension().location() + "；生命=" + Math.round(player.getHealth()) + "；饱食=" + player.getFoodData().getFoodLevel()
+            + "；" + (level.isNight() ? "夜晚" : "白天") + "；" + (level.isRaining() ? "下雨" : "晴朗")
+            + "；群系=" + level.getBiome(player.blockPosition()).unwrapKey().map(k -> k.location().toString()).orElse("未知")
+            + "；视线=" + looking + "；敌怪=" + nearby.stream().filter(Monster.class::isInstance).count()
+            + "；动物=" + nearby.stream().filter(Animal.class::isInstance).count() + "；掉落物=" + nearby.stream().filter(ItemEntity.class::isInstance).count()
+            + (companion == null ? "；龙龙尚未召唤" : "；" + bounded(companion.describeForAi(), 2200));
     }
-
-    private static String readApiError(String body) {
-        try {
-            JsonObject root = JsonParser.parseString(body.trim()).getAsJsonObject();
-            if (root.has("error")) {
-                JsonElement error = root.get("error");
-                if (error.isJsonObject() && error.getAsJsonObject().has("message"))
-                    return error.getAsJsonObject().get("message").getAsString();
-                return error.toString();
-            }
-        } catch (Exception ignored) {}
-        return body == null || body.isBlank() ? "服务没有返回错误说明" : body.substring(0, Math.min(200, body.length()));
-    }
-
-    private static String safeError(Throwable error) {
-        Throwable current = error;
-        while (current.getCause() != null) current = current.getCause();
-        String message = current.getMessage();
-        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
-    }
-
     private record Message(String role, String content) {}
-    private record ParsedReply(String text, String thought, String emotion, List<AgentAction> actions) {}
+    record ParsedReply(String text, String thought, String emotion, List<AgentAction> actions) {}
 }

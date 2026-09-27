@@ -28,7 +28,7 @@ public final class QxfMcAi {
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, McAiConfig.SPEC, "qxfmcai-server.toml");
         MinecraftForge.EVENT_BUS.register(this);
-        LOGGER.info("qxfMCAI v11.1.0 已加载：自适应四合一棋桌、完整麻将与真实任务引擎就绪");
+        LOGGER.info("qxfMCAI v12.0.0 已加载：智慧快行控制台与实时任务引擎就绪");
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

@@ -11,14 +11,14 @@ authors="${mod_authors}"
 displayURL="https://github.com/QXF19/qxfMCAI"
 description='''
 全中文 Minecraft Forge 智能伙伴“龙龙”。支持 OpenAI、DeepSeek 与自定义兼容模型，
-拥有实际挖矿、建造、战斗、储物和命令执行能力。v11 以 API 负责智能决策，
-本地单实体与轻量二维毛毛龙皮肤负责真实行动，并提供场景情绪、可靠跟随、骑乘，以及五子棋、象棋、围棋、四人麻将四合一实体棋桌。
+v12 智慧快行：即时控制、可暂停任务、实时进度、分帧搜索与可取消的 AI 规划。
+轻量二维毛毛龙皮肤、中文场景互动、真实生存任务，以及五子棋、象棋、围棋、麻将四合一实体棋桌。
 '''
 
 [[dependencies.${mod_id}]]
 modId="forge"
 mandatory=true
-versionRange="[47.4.10,)"
+versionRange="[${forge_version},)"
 ordering="NONE"
 side="BOTH"
 

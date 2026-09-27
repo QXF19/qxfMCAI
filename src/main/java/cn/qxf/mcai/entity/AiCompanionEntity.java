@@ -145,6 +145,13 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     private int workProgress;
     private int workGoal;
     private int taskTicks;
+    private int lastProgressTick;
+    private boolean taskPaused;
+    private Mode pausedMode = Mode.STAY;
+    private long taskRevision;
+    private String lastTaskResult = "尚无任务记录";
+    @Nullable private SearchCursor undergroundScan;
+    @Nullable private BlockPos scanOrigin;
     private Vec3 lastTaskPosition = Vec3.ZERO;
     private int navigationRecoveryAttempts;
     private int bubbleTicks;
@@ -207,17 +214,19 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         goalSelector.addGoal(0, new FloatGoal(this));
         goalSelector.addGoal(1, new RangedAttackGoal(this, 1.0D, 20, 15.0F) {
             @Override public boolean canUse() {
-                return getMainHandItem().getItem() instanceof BowItem && hasArrows() && super.canUse();
+                return !taskPaused && getMainHandItem().getItem() instanceof BowItem && hasArrows() && super.canUse();
             }
+            @Override public boolean canContinueToUse() { return !taskPaused && super.canContinueToUse(); }
         });
         goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.15D, true) {
             @Override public boolean canUse() {
-                return !(getMainHandItem().getItem() instanceof BowItem) && super.canUse();
+                return !taskPaused && !(getMainHandItem().getItem() instanceof BowItem) && super.canUse();
             }
+            @Override public boolean canContinueToUse() { return !taskPaused && super.canContinueToUse(); }
         });
         goalSelector.addGoal(3, new FollowOwnerGoal(this, 1.15D, 5.0F, 2.0F, false) {
-            @Override public boolean canUse() { return getMode() == Mode.FOLLOW && super.canUse(); }
-            @Override public boolean canContinueToUse() { return getMode() == Mode.FOLLOW && super.canContinueToUse(); }
+            @Override public boolean canUse() { return !taskPaused && getMode() == Mode.FOLLOW && super.canUse(); }
+            @Override public boolean canContinueToUse() { return !taskPaused && getMode() == Mode.FOLLOW && super.canContinueToUse(); }
         });
         goalSelector.addGoal(7, new LookAtPlayerGoal(this, Player.class, 10.0F));
         goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -257,6 +266,12 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             return;
         }
 
+        if (taskPaused) {
+            getNavigation().stop(); setTarget(null);
+            setActivity("已暂停 · 保留任务进度");
+            return;
+        }
+
         tickTaskEngine();
         if (ownerPlayTicks > 0 && currentTask == null && taskQueue.isEmpty()) {
             tickOwnerPlay();
@@ -271,16 +286,16 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
                 case FISH -> fishTick();
                 case BUILD -> buildTick();
                 case FOLLOW -> followTick();
-                case STAY -> {
+                case STAY, IDLE -> {
                     setTarget(null);
                     getNavigation().stop();
                 }
                 default -> { }
             }
         }
-        if (ownerPlayTicks <= 0 && McAiConfig.AUTONOMY_ENABLED.get() && currentTask == null && taskQueue.isEmpty()
+        if (ownerPlayTicks <= 0 && getMode() != Mode.STAY && McAiConfig.AUTONOMY_ENABLED.get() && currentTask == null && taskQueue.isEmpty()
             && tickCount % AI_AUTONOMY_INTERVAL_TICKS == 0) autonomousDecision();
-        if (ownerPlayTicks <= 0 && currentTask == null && taskQueue.isEmpty()
+        if (ownerPlayTicks <= 0 && getMode() != Mode.STAY && currentTask == null && taskQueue.isEmpty()
             && tickCount % OWNER_PLAY_INTERVAL_TICKS == 0) startOwnerPlay("");
         if (tickCount % 1200 == 0) offerFamilyProposal();
     }
@@ -292,7 +307,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
 
     /** 空闲时走到主人视线前做短动作，不发第二条聊天，也不改变主人选择的工作模式。 */
     public boolean startOwnerPlay(String requestedGesture) {
-        if (!(getOwner() instanceof ServerPlayer owner) || currentTask != null || !taskQueue.isEmpty()
+        if (taskPaused || !(getOwner() instanceof ServerPlayer owner) || currentTask != null || !taskQueue.isEmpty()
             || distanceToSqr(owner) > 144.0D) return false;
         String gesture = requestedGesture == null ? "" : requestedGesture.trim().toLowerCase(Locale.ROOT);
         boolean known = false;
@@ -342,17 +357,16 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     public void enqueueAction(AgentAction action) {
-        if (action == null || action.type().isBlank() || taskQueue.size() >= 16) return;
+        if (action == null || action.type().isBlank()) return;
         if (action.type().equals("stop")) {
-            taskQueue.clear();
-            currentTask = null;
-            buildQueue.clear();
-            clearMiningTarget();
-            setMode(Mode.STAY);
+            cancelAllTasks();
             speak("好，我已经立即停下来了。", "focused");
             return;
         }
-        if (currentTask == null && taskQueue.isEmpty()) {
+        if (java.util.Set.of("follow", "stay", "come", "guard").contains(action.type())) cancelAllTasks();
+        if (taskQueue.size() >= 16) { notifyOwner("任务队列已满，这项任务未加入。请先完成或取消已有任务。"); return; }
+        taskRevision++;
+        if (!taskPaused && currentTask == null && taskQueue.isEmpty()) {
             startTask(action);
             QxfMcAi.LOGGER.info("龙龙立即开始任务：type={} target={} count={}",
                 action.type(), action.target(), action.count());
@@ -367,14 +381,23 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (currentTask == null && !taskQueue.isEmpty()) startTask(taskQueue.removeFirst());
         if (currentTask == null) return;
         taskTicks++;
+        if (taskTicks % 20 == 0 && position().distanceToSqr(lastTaskPosition) > 0.25D) {
+            lastProgressTick = taskTicks;
+            lastTaskPosition = position();
+        }
         if (taskTicks % TASK_PROGRESS_REVIEW_TICKS == 0 && getOwner() instanceof ServerPlayer owner)
             AiService.reviewAgentState(owner, "任务进度", describeForAi(), true);
-        if (taskTicks > TASK_HARD_TIMEOUT_TICKS) finishTask(false, "长时间无新进展，已安全停止并保留已完成成果");
+        if (taskTicks - lastProgressTick > 900 || taskTicks > TASK_HARD_TIMEOUT_TICKS * 6)
+            finishTask(false, "路径受阻或长时间无进展，已停止这项任务，保留实际成果；可调整位置后重试");
     }
 
     private void startTask(AgentAction action) {
         currentTask = action;
+        taskRevision++;
         taskTicks = 0;
+        lastProgressTick = 0;
+        undergroundScan = null; scanOrigin = null;
+        finishOwnerPlay();
         workProgress = 0;
         workGoal = action.count();
         lastTaskPosition = position();
@@ -453,6 +476,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     private void completeWorkUnit() {
+        lastProgressTick = taskTicks;
         workProgress++;
         addExperience(3);
         if (currentTask != null && workProgress >= workGoal)
@@ -460,6 +484,9 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     private void finishTask(boolean success, String result) {
+        taskRevision++;
+        lastTaskResult = (success ? "完成：" : "未完成：") + result;
+        undergroundScan = null; scanOrigin = null;
         String finishedType = currentTask == null ? "unknown" : currentTask.type();
         if (success) {
             completedTasks++;
@@ -479,12 +506,12 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (getMode() == Mode.GATHER || getMode() == Mode.MINE || getMode() == Mode.EXPLORE
             || getMode() == Mode.PATROL || getMode() == Mode.HUNT || getMode() == Mode.LUMBER
             || getMode() == Mode.FARM || getMode() == Mode.BUILD || getMode() == Mode.FISH)
-            setMode(Mode.STAY);
+            setMode(Mode.IDLE);
         notifyOwner((success ? "任务完成" : "任务失败") + "：" + result);
         QxfMcAi.LOGGER.info("龙龙任务结束：type={} success={} result={}", finishedType, success, result);
         if (getOwner() instanceof ServerPlayer owner)
             AiService.reviewAgentState(owner, success ? "任务完成" : "任务失败",
-                "任务=" + finishedType + "，结果=" + result + "。" + describeForAi(), true);
+                "任务=" + finishedType + "，结果=" + result + "。" + describeForAi(), false);
     }
 
     private void autonomousDecision() {
@@ -493,15 +520,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
             AiService.reviewAgentState(owner, "AI自主决策", describeForAi(), true);
             return;
         }
-        if (getHealth() < getMaxHealth() * 0.45F && hasFood()) enqueueAction(AgentAction.simple("eat"));
-        else if (owner.level().isNight())
-            enqueueAction(new AgentAction("patrol", "home", 2, "", ""));
-        else switch (habit) {
-            case "矿工" -> enqueueAction(new AgentAction("mine", "ores", 3, "", ""));
-            case "建设者" -> enqueueAction(new AgentAction("build_house", "central_base", 1, "", ""));
-            case "守卫" -> enqueueAction(new AgentAction("patrol", "", 2, "", ""));
-            default -> enqueueAction(new AgentAction(random.nextBoolean() ? "explore" : "find_cave", "", 1, "", ""));
-        }
+        if (getHealth() < getMaxHealth() * 0.45F && hasFood()) eatFromInventory();
         thought = switch (random.nextInt(4)) {
             case 0 -> "想把基地周围变得更安全";
             case 1 -> "在盘算下一次下矿要准备什么";
@@ -674,7 +693,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         }
         if (miningTarget == null || !isValidOre(serverLevel, miningTarget)) {
             clearMiningTarget();
-            if (tickCount % 40 == 0) {
+            {
                 miningTarget = findOreBelow(serverLevel);
                 if (miningTarget != null && !miningTarget.equals(lastNotifiedOre)) {
                     lastNotifiedOre = miningTarget.immutable();
@@ -712,7 +731,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
 
     private void findCaveTick(ServerLevel level) {
         if (workTarget == null || !isCavePocket(level, workTarget)) {
-            if (tickCount % 40 == 0) {
+            {
                 workTarget = findCaveBelow(level);
                 if (workTarget != null)
                     offerTeleportToOwner(workTarget, "我发现了地下天然空间，坐标 " + workTarget.toShortString());
@@ -751,24 +770,12 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
 
     @Nullable
     private BlockPos findCaveBelow(ServerLevel level) {
-        BlockPos origin = blockPosition();
-        int radius = McAiConfig.MINING_RADIUS.get();
-        int depth = Math.min(64, McAiConfig.MINING_DEPTH.get() * 2);
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        int checked = 0;
-        caveScan: for (int dy = -4; dy >= -depth; dy--) for (int dx = -radius; dx <= radius; dx += 2)
-            for (int dz = -radius; dz <= radius; dz++) {
-                if (++checked > 6144) break caveScan;
-                BlockPos pos = origin.offset(dx, dy, dz);
-                if (!isCavePocket(level, pos)) continue;
-                double distance = pos.distSqr(origin);
-                if (distance < bestDistance) { bestDistance = distance; best = pos.immutable(); }
-            }
-        return best;
+        return scanUnderground(level, true);
     }
 
     private boolean isCavePocket(ServerLevel level, BlockPos pos) {
+        if (!loadedSearchPosition(level, pos) || !level.hasChunkAt(pos.north()) || !level.hasChunkAt(pos.south())
+                || !level.hasChunkAt(pos.east()) || !level.hasChunkAt(pos.west())) return false;
         if (!level.getBlockState(pos).isAir() || !level.getBlockState(pos.above()).isAir()
             || level.getBlockState(pos.below()).isAir() || level.canSeeSky(pos)) return false;
         int open = 0;
@@ -779,23 +786,32 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
 
     @Nullable
     private BlockPos findOreBelow(ServerLevel level) {
-        int radius = McAiConfig.MINING_RADIUS.get();
-        int depth = McAiConfig.MINING_DEPTH.get();
-        BlockPos origin = blockPosition();
-        BlockPos best = null;
-        double bestScore = Double.MAX_VALUE;
-        int checked = 0;
-        oreScan: for (int dy = -1; dy >= -depth; dy--) {
-            int horizontal = Math.min(radius, 4 + (-dy / 3));
-            for (int dx = -horizontal; dx <= horizontal; dx++) for (int dz = -horizontal; dz <= horizontal; dz++) {
-                if (++checked > 8192) break oreScan;
-                BlockPos candidate = origin.offset(dx, dy, dz);
-                if (!isValidOre(level, candidate) || !getMainHandItem().isCorrectToolForDrops(level.getBlockState(candidate))) continue;
-                double score = candidate.distSqr(origin) + Math.abs(dy) * 0.25D;
-                if (score < bestScore) { bestScore = score; best = candidate.immutable(); }
-            }
+        return scanUnderground(level, false);
+    }
+
+    @Nullable
+    private BlockPos scanUnderground(ServerLevel level, boolean cave) {
+        if (undergroundScan == null || scanOrigin == null) {
+            undergroundScan = new SearchCursor(McAiConfig.MINING_RADIUS.get(),
+                cave ? Math.min(64, McAiConfig.MINING_DEPTH.get() * 2) : McAiConfig.MINING_DEPTH.get(), cave ? 4 : 1);
+            scanOrigin = blockPosition().immutable();
         }
-        return best;
+        // 每次最多 192 个候选；游标保留到下一帧，深层不再被固定前缀截掉。
+        for (int budget = 0; budget < 192 && undergroundScan.hasNext(); budget++) {
+            var offset = undergroundScan.next();
+            BlockPos pos = scanOrigin.offset(offset.x(), offset.y(), offset.z());
+            if (!loadedSearchPosition(level, pos)) continue;
+            boolean match = cave ? isCavePocket(level, pos) : isValidOre(level, pos)
+                && getMainHandItem().isCorrectToolForDrops(level.getBlockState(pos));
+            if (match) { undergroundScan = null; scanOrigin = null; return pos.immutable(); }
+        }
+        if (!undergroundScan.hasNext()) { undergroundScan = null; scanOrigin = null; }
+        return null;
+    }
+
+    private boolean loadedSearchPosition(ServerLevel level, BlockPos pos) {
+        return pos.getY() > level.getMinBuildHeight() && pos.getY() < level.getMaxBuildHeight() - 1
+            && level.getWorldBorder().isWithinBounds(pos) && level.hasChunkAt(pos);
     }
 
     private void excavateToward(ServerLevel level, BlockPos target) {
@@ -806,6 +822,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         BlockPos next = here.offset(dx, dy, dz);
         BlockPos[] passage = {next, next.above()};
         for (BlockPos pos : passage) {
+            if (!loadedSearchPosition(level, pos)) return;
             BlockState state = level.getBlockState(pos);
             if (!state.isAir() && state.getDestroySpeed(level, pos) >= 0 && state.getFluidState().isEmpty()
                 && level.getBlockEntity(pos) == null) {
@@ -824,11 +841,13 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     private boolean breakIntoInventory(ServerLevel level, BlockPos pos, ItemStack tool) {
+        if (!loadedSearchPosition(level, pos)) return false;
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || state.getDestroySpeed(level, pos) < 0 || !state.getFluidState().isEmpty()
             || level.getBlockEntity(pos) != null) return false;
         List<ItemStack> drops = Block.getDrops(state, level, pos, level.getBlockEntity(pos), this, tool);
         level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+        lastProgressTick = taskTicks;
         level.levelEvent(2001, pos, Block.getId(state));
         for (ItemStack drop : drops) {
             ItemStack remainder = inventory.addItem(drop.copy());
@@ -845,6 +864,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     }
 
     private boolean isValidOre(ServerLevel level, BlockPos pos) {
+        if (!loadedSearchPosition(level, pos)) return false;
         BlockState state = level.getBlockState(pos);
         return state.is(Tags.Blocks.ORES) && state.getDestroySpeed(level, pos) >= 0.0F;
     }
@@ -1132,7 +1152,11 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         }
         BlockPos pos = buildQueue.peekFirst();
         if (!serverLevel.getWorldBorder().isWithinBounds(pos)) { buildQueue.removeFirst(); return; }
-        if (pos.distSqr(blockPosition()) > 20.0D) { getNavigation().moveTo(pos.getX(), pos.getY(), pos.getZ(), 1.35D); return; }
+        if (!loadedSearchPosition(serverLevel, pos)) { finishTask(false, "建筑区域尚未加载或超出世界边界"); return; }
+        if (pos.distSqr(blockPosition()) > 20.0D) {
+            if (tickCount % 10 == 0) getNavigation().moveTo(pos.getX(), pos.getY(), pos.getZ(), 1.35D);
+            return;
+        }
         if (!serverLevel.getBlockState(pos).canBeReplaced()) { buildQueue.removeFirst(); return; }
         int slot = findBuildingBlock();
         if (slot < 0) { finishTask(false, "背包里没有可用建筑方块"); return; }
@@ -1141,6 +1165,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         BlockState placement = block.defaultBlockState();
         if (!placement.canSurvive(serverLevel, pos)) { buildQueue.removeFirst(); return; }
         serverLevel.setBlock(pos, placement, 3);
+        lastProgressTick = taskTicks;
         stack.shrink(1);
         inventory.setChanged();
         buildQueue.removeFirst();
@@ -1494,6 +1519,39 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public String getActivity() { return entityData.get(DATA_ACTIVITY); }
     public void setActivity(String activity) { entityData.set(DATA_ACTIVITY, sanitize(activity, 80, "空闲")); }
     public String getThought() { return thought; }
+    public long getTaskRevision() { return taskRevision; }
+    public boolean isTaskPaused() { return taskPaused; }
+    public int getTaskProgress() { return workProgress; }
+    public int getTaskGoal() { return currentTask == null ? 0 : workGoal; }
+    public String getTaskLabel() { return currentTask == null ? getMode().chinese :
+        cn.qxf.mcai.ai.LocalTaskPlanner.summary(List.of(currentTask)); }
+    public List<String> getQueuedTaskLabels() { return taskQueue.stream()
+        .map(a -> cn.qxf.mcai.ai.LocalTaskPlanner.summary(List.of(a)) + " × " + a.count()).toList(); }
+    public String getLastTaskResult() { return lastTaskResult; }
+    public void setTaskPaused(boolean paused) {
+        if (taskPaused == paused) return;
+        taskRevision++;
+        taskPaused = paused;
+        if (paused) {
+            pausedMode = getMode();
+            ownerPlayTicks = 0;
+            entityData.set(DATA_GESTURE, "");
+            setMode(Mode.STAY); getNavigation().stop(); setTarget(null);
+        } else {
+            setMode(pausedMode);
+            setActivity(currentTask == null ? getMode().chinese : getTaskLabel());
+        }
+    }
+    public void cancelAllTasks() {
+        taskRevision++;
+        taskQueue.clear(); currentTask = null; buildQueue.clear();
+        clearMiningTarget(); workTarget = null; searchTunnelTarget = null;
+        undergroundScan = null; scanOrigin = null;
+        taskPaused = false; taskTicks = 0; workGoal = 0; workProgress = 0;
+        ownerPlayTicks = 0; entityData.set(DATA_GESTURE, "");
+        setTarget(null); getNavigation().stop(); setMode(Mode.STAY);
+        setActivity("已停止 · 等待主人安排"); lastTaskResult = "已取消任务，保留实际物资与建筑";
+    }
     public void setThought(String value) { thought = sanitize(value, 256, thought); }
     public String getLongTermGoal() { return longTermGoal; }
     public String getHabit() { return habit; }
@@ -1874,7 +1932,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         if (getMode() == Mode.MINE && mode != Mode.MINE) clearMiningTarget();
         entityData.set(DATA_MODE, mode.id);
         setOrderedToSit(mode == Mode.STAY);
-        if (mode == Mode.STAY) setTarget(null);
+        if (mode == Mode.STAY || mode == Mode.IDLE) setTarget(null);
         setActivity(mode.chinese);
     }
     public boolean isCompanionInvincible() { return entityData.get(DATA_INVINCIBLE); }
@@ -1919,7 +1977,8 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         tag.put("DragonAccessories", accessories.createTag());
         tag.putBoolean("DragonStarterKitGranted", starterKitGranted);
         tag.putInt("DragonCentralBuildingIndex", centralBuildingIndex);
-        tag.putInt("DragonDataVersion", 12);
+        tag.putInt("DragonDataVersion", 13);
+        tag.putString("DragonLastTaskResult", lastTaskResult);
         tag.putString("DragonHabit", habit);
         if (homePosition != null) tag.putLong("DragonHome", homePosition.asLong());
         tag.put("DragonInventory", inventory.createTag());
@@ -1991,6 +2050,13 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
         ListTag memoryTag = tag.getList("DragonMemories", Tag.TAG_STRING);
         for (int i = 0; i < memoryTag.size(); i++) remember(memoryTag.getString(i));
         initializeIndependentAgent();
+        // 旧版只保存模式，没有保存任务目标；不能重载后无目标挖掘或建造。
+        lastTaskResult = sanitize(tag.getString("DragonLastTaskResult"), 256, "尚无任务记录");
+        if (getMode() != Mode.FOLLOW && getMode() != Mode.GUARD && getMode() != Mode.STAY && getMode() != Mode.IDLE) {
+            setMode(Mode.STAY);
+            lastTaskResult = "存档已重载，上次任务已停止；实际成果保留，请重新交付任务";
+            setActivity("等待主人重新安排");
+        }
     }
 
     private void moveVisibleEquipmentToHidden() {
@@ -2037,7 +2103,7 @@ public class AiCompanionEntity extends TamableAnimal implements RangedAttackMob 
     public enum Mode {
         FOLLOW(0, "跟随"), STAY(1, "等待"), GUARD(2, "警戒"), GATHER(3, "拾取"), MINE(4, "下矿"),
         EXPLORE(5, "探索"), PATROL(6, "巡逻"), HUNT(7, "战斗"), LUMBER(8, "伐木"), FARM(9, "耕作"),
-        BUILD(10, "建造"), FISH(11, "钓鱼");
+        BUILD(10, "建造"), FISH(11, "钓鱼"), IDLE(12, "自主待命");
         public final int id;
         public final String chinese;
         Mode(int id, String chinese) { this.id = id; this.chinese = chinese; }

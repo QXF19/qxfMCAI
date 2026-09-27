@@ -51,6 +51,7 @@ public record UpdateAiConfigPacket(String provider, String baseUrl, String model
                     message.apiKey, message.clearApiKey, message.proactiveEnabled,
                     message.autonomyEnabled, message.allowFullCommands, message.corePrompt,
                     message.taskPrompt, message.autonomyPrompt, message.proactiveChatPrompt);
+                cn.qxf.mcai.ai.AiService.shutdown();
                 sender.sendSystemMessage(Component.literal("[qxfMCAI] API配置已安全保存；密钥不会回传到客户端。")
                     .withStyle(ChatFormatting.GREEN));
             } catch (RuntimeException error) {

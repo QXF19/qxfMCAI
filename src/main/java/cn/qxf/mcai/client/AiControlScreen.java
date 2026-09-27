@@ -2,8 +2,10 @@ package cn.qxf.mcai.client;
 
 import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.network.AiConfigSnapshotPacket;
+import cn.qxf.mcai.network.AgentStatusPacket;
 import cn.qxf.mcai.network.ModNetwork;
 import cn.qxf.mcai.network.RequestAiConfigPacket;
+import cn.qxf.mcai.network.RequestAgentStatusPacket;
 import cn.qxf.mcai.network.UpdateAiConfigPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -16,7 +18,7 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
-/** v11 单页紧凑控制台：自然语言、常用操作、互动入口与 AI 设置合并在同一界面。 */
+/** v12 智慧快行控制台：保留单页操作，并展示服务端真实任务状态。 */
 public final class AiControlScreen extends Screen {
     private enum PromptSlot { CORE, TASK, AUTONOMY, CHAT }
     private static final String[][] TASK_TEMPLATES = {
@@ -31,6 +33,9 @@ public final class AiControlScreen extends Screen {
 
     private boolean settingsExpanded;
     private boolean snapshotRequested;
+    private boolean snapshotApplied;
+    private AgentStatusPacket agentStatus;
+    private CompactButton pauseButton;
     private boolean proactive = true;
     private boolean autonomy = true;
     private boolean clearKey;
@@ -63,18 +68,20 @@ public final class AiControlScreen extends Screen {
     private int top;
     private int panelWidth;
     private int panelHeight;
+    private int statusPollTicks;
 
-    public AiControlScreen() { super(Component.literal("qxfMCAI v11 · 龙龙紧凑控制台")); }
+    public AiControlScreen() { super(Component.literal("qxfMCAI v12 · 龙龙智慧快行")); }
 
     @Override
     protected void init() {
         panelWidth = Math.min(500, width - 16);
-        panelHeight = settingsExpanded ? Math.min(300, height - 12) : Math.min(248, height - 12);
+        panelHeight = Math.min(settingsExpanded ? 300 : 310, height - 12);
         left = (width - panelWidth) / 2;
         top = Math.max(6, (height - panelHeight) / 2);
         int x = left + 16, contentWidth = panelWidth - 32, y = top + 35;
 
-        commandBox = input(x, y, contentWidth - 94, 22, "对龙龙说话或交付任务", "", 512);
+        String previousInput = commandBox == null ? "" : commandBox.getValue();
+        commandBox = input(x, y, contentWidth - 94, 22, "对龙龙说话或交付任务", previousInput, 512);
         addRenderableWidget(new CompactButton(x + contentWidth - 88, y, 88, 22,
             Component.literal("发送给龙龙"), true, this::submit));
         y += 26;
@@ -84,6 +91,7 @@ public final class AiControlScreen extends Screen {
             snapshotRequested = true;
             ModNetwork.CHANNEL.sendToServer(new RequestAiConfigPacket());
         }
+        ModNetwork.CHANNEL.sendToServer(new RequestAgentStatusPacket());
     }
 
     private void initHome(int x, int y, int width) {
@@ -96,17 +104,20 @@ public final class AiControlScreen extends Screen {
             {"召回并跟随", "mcai summon"}, {"27格背包", "mcai inventory"}, {"骑乘", "mcai ride"}, {"显示/隐藏", "mcai hide"}
         });
         y += 27;
-        buttonRow(x, y, width, new String[][]{
-            {"领取四合一棋桌", "mcai board"}, {"跟随", "mcai follow"}, {"无敌/生存", "mcai invincible"}, {"AI设置", "@settings"}
-        });
+        int gap = 5, each = (width - gap * 3) / 4;
+        pauseButton = button(x, y, each, pauseLabel(), false, () -> run(
+            agentStatus != null && agentStatus.paused() ? "mcai resume" : "mcai pause", "切换任务暂停"));
+        button(x + each + gap, y, each, "停止任务", false, () -> run("mcai stop", "停止任务"));
+        button(x + (each + gap) * 2, y, each, "跟随", false, () -> run("mcai follow", "跟随"));
+        button(x + (each + gap) * 3, y, each, "AI设置", true, this::toggleSettings);
         y += 27;
-        buttonRow(x, y, width, new String[][]{
-            {"特殊·传送到qxf1975", "mcai special teleport_to_qxf1975"}, {"查看状态", "mcai status"}
-        });
-        y += 29;
-        addRenderableWidget(new CompactButton(x, y, width, 22,
-            Component.literal("动作：wave / dance / cheer / bow / shy / stretch / nod / look / spin / hop"), false,
-            () -> run("mcai play dance", "跳舞")));
+        if (panelHeight >= 270) {
+            buttonRow(x, y, width, new String[][]{
+                {"四合一棋桌", "mcai board"}, {"无敌/生存", "mcai invincible"},
+                {"传送到qxf1975", "mcai special teleport_to_qxf1975"}, {"动作·跳舞", "mcai play dance"}
+            });
+            y += 29;
+        }
     }
 
     private void initSettings(int x, int y, int width) {
@@ -272,6 +283,8 @@ public final class AiControlScreen extends Screen {
     }
 
     public void applyServerSnapshot(AiConfigSnapshotPacket snapshot) {
+        if (snapshotApplied) return;
+        snapshotApplied = true;
         provider = snapshot.provider(); proactive = snapshot.proactiveEnabled(); autonomy = snapshot.autonomyEnabled();
         baseUrl = snapshot.baseUrl(); model = snapshot.model();
         corePrompt = snapshot.corePrompt(); taskPrompt = snapshot.taskPrompt(); autonomyPrompt = snapshot.autonomyPrompt();
@@ -284,6 +297,22 @@ public final class AiControlScreen extends Screen {
         if (modelPresetButton != null) modelPresetButton.setMessage(Component.literal(modelPresetLabel()));
         if (promptBox != null) promptBox.setValue(promptValue());
         status = Component.literal("已载入服务端设置·密钥保持隐藏");
+    }
+
+    public void applyAgentStatus(AgentStatusPacket snapshot) {
+        agentStatus = snapshot;
+        if (pauseButton != null) pauseButton.setMessage(Component.literal(pauseLabel()));
+    }
+
+    private String pauseLabel() { return agentStatus != null && agentStatus.paused() ? "继续任务" : "暂停任务"; }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (++statusPollTicks >= 20) {
+            statusPollTicks = 0;
+            ModNetwork.CHANNEL.sendToServer(new RequestAgentStatusPacket());
+        }
     }
 
     private void preserveConnectionFields() {
@@ -319,7 +348,7 @@ public final class AiControlScreen extends Screen {
         graphics.fillGradient(left, top, left + panelWidth, top + panelHeight, 0xED161F35, 0xED0A1120);
         graphics.renderOutline(left, top, panelWidth, panelHeight, 0x906D93FF);
         graphics.fill(left, top, left + 4, top + panelHeight, 0xFF64D8C3);
-        graphics.drawString(font, "龙龙 · LONGLONG  v11", left + 16, top + 12, 0xFFF4F7FF, false);
+        graphics.drawString(font, "龙龙 · LONGLONG  v12", left + 16, top + 12, 0xFFF4F7FF, false);
         graphics.drawString(font, settingsExpanded ? "AI设置 · 与控制台合并" : "轻量二维皮肤 · 主人互动模式",
             left + 180, top + 12, 0xFF82E7D5, false);
         inputSurface(graphics, commandBox);
@@ -329,8 +358,42 @@ public final class AiControlScreen extends Screen {
             inputSurface(graphics, apiKeyBox);
             inputSurface(graphics, promptBox);
         }
-        graphics.drawString(font, status, left + 16, top + panelHeight - 16, 0xFFA8CAFF, false);
+        if (!settingsExpanded) renderAgentStatus(graphics);
+        graphics.drawString(font, font.plainSubstrByWidth(status.getString(), panelWidth - 32),
+            left + 16, top + panelHeight - 16, 0xFFA8CAFF, false);
         super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    private void renderAgentStatus(GuiGraphics graphics) {
+        int x = left + 16, y = top + (panelHeight >= 270 ? 181 : 151);
+        int right = left + panelWidth - 16;
+        int bottom = top + panelHeight - 29;
+        if (bottom - y < 36) return;
+        graphics.fillGradient(x, y, right, bottom, 0xB0162940, 0xB0101B30);
+        graphics.renderOutline(x, y, right - x, bottom - y, 0x8064D8C3);
+        if (agentStatus == null) { graphics.drawString(font, "正在读取龙龙状态…", x + 8, y + 8, 0xFFB4D8FF, false); return; }
+        var data = agentStatus;
+        String title = data.present() ? (data.paused() ? "⏸ " : "▶ ") + data.task() : "龙龙尚未召唤";
+        drawFit(graphics, title, x + 8, y + 7, right - x - 16, 0xFFF4F7FF);
+        if (data.present() && data.goal() > 0) {
+            int barY = y + 22, width = right - x - 16;
+            graphics.fill(x + 8, barY, right - 8, barY + 4, 0xFF31465F);
+            graphics.fill(x + 8, barY, x + 8 + (int) ((long) width * Math.min(data.progress(), data.goal()) / data.goal()), barY + 4, 0xFF64D8C3);
+        }
+        int line = data.goal() > 0 ? y + 31 : y + 22;
+        if (line + 10 < bottom) drawFit(graphics,
+            data.goal() > 0 ? "进度 " + data.progress() + "/" + data.goal() + " · 队列 " + data.queue().size()
+                : "队列 " + data.queue().size() + " · " + data.aiStatus(), x + 8, line, right - x - 16, 0xFF82E7D5);
+        line += 12;
+        if (line + 10 < bottom) drawFit(graphics, data.lastResult().isBlank() ? data.aiStatus() : data.lastResult(),
+            x + 8, line, right - x - 16, 0xFFA8CAFF);
+        line += 12;
+        if (line + 10 < bottom && !data.queue().isEmpty()) drawFit(graphics, "待办：" + data.queue().get(0),
+            x + 8, line, right - x - 16, 0xFFC7D4E8);
+    }
+
+    private void drawFit(GuiGraphics graphics, String text, int x, int y, int width, int color) {
+        graphics.drawString(font, font.plainSubstrByWidth(text, width), x, y, color, false);
     }
 
     private void inputSurface(GuiGraphics graphics, EditBox box) {

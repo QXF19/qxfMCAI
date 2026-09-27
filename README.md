@@ -1,13 +1,21 @@
-# qxfMCAI v11
+# qxfMCAI v12 · 智慧快行
 
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
-[![Forge](https://img.shields.io/badge/Forge-47.4.10%2B-DFA86A)](https://files.minecraftforge.net/)
-[![Version](https://img.shields.io/badge/version-11.1.0-72e4ff)](https://github.com/QXF19/qxfMCAI/releases)
+[![Forge](https://img.shields.io/badge/Forge-47.4.0%2B-DFA86A)](https://files.minecraftforge.net/)
+[![Version](https://img.shields.io/badge/version-12.0.0-72e4ff)](https://github.com/QXF19/qxfMCAI/releases)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 面向 Minecraft Java 1.20.1 / Forge 的全中文 AI 毛毛龙生存伙伴。龙龙始终称绑定玩家为“主人”，能理解现场、产生喜怒哀乐、聊天互动、跟随与骑乘，并把 AI 规划落实为真实移动、挖矿、建造、耕作、战斗和工具使用。
 
-## v11 重点
+## v12 重点
+
+- 针对 Forge 47.4.0 编译并声明最低版本 47.4.0；客户端与服务端都需安装同一 JAR。
+- “停止、暂停、继续、跟随、过来”直接在服务端执行；取消后旧 API 回复失效，不会把已取消任务重新排队。
+- 主控制台显示真实当前任务、进度、待办队列、上次结果和 API 状态；设置与提示词编辑仍在同一菜单内。
+- 挖矿和找矿洞采用跨帧游标搜索，每轮限制扫描数量，避免重复扫描浅层或一次卡住服务器。
+- API 请求可取消、设置超时，最多并发四人；服务端重启和玩家离线时清理待处理请求与聊天历史。
+- 普通提问和五分钟聊天只回复，不执行 AI 幻觉动作；明确交付任务由 API 规划，空闲自主决策最多启动一项非建造行动。游戏命令要求主人自身具有 OP4。
+- 暂停保留本次运行中的任务进度；重开存档后，未完成的现场任务需重新交付，已有建筑与物资会保留。
 
 - 修复跟随和骑乘：召唤/召回默认恢复跟随，主人可直接操纵龙龙移动，潜行下马
 - 新增显示/隐藏和“一键无敌/普通生存”控制；隐藏不会停止思考或已接受任务
@@ -24,8 +32,8 @@
 
 ## 安装
 
-1. 安装 Minecraft 1.20.1 与 Forge 47.4.10 或更高版本。
-2. 下载 `qxfmcai-11.1.0.jar`，放入客户端与服务端的 `mods` 文件夹。
+1. 安装 Minecraft 1.20.1 与 Forge 47.4.0 或更高版本。
+2. 下载 `qxfmcai-12.0.0.jar`，放入客户端与服务端的 `mods` 文件夹，并移除旧版 qxfMCAI JAR。
 3. 不需要 Yes Steve Model 或 Touhou Little Maid；v11 不会改动主人的玩家皮肤。
 4. 进入世界后按 `M` 打开紧凑控制台，配置 OpenAI、DeepSeek 或兼容 OpenAI Chat Completions 的接口。
 
@@ -44,6 +52,7 @@ U：龙龙，你觉得这里适合安家吗？
 常用命令：
 
 - `/mcai summon`：召唤龙龙
+- `/mcai pause`、`/mcai resume`、`/mcai stop`：立即暂停、继续或取消任务；菜单里也有对应按钮
 - `/mcai status`：查看任务、好感度、存储和棋类战绩
 - `/mcai inventory`：打开 27 格物资背包
 - `/mcai ride`：骑乘并直接操纵龙龙
@@ -58,7 +67,7 @@ U：龙龙，你觉得这里适合安家吗？
 
 API 密钥保存在 Forge 服务端配置中，不通过聊天回传。也可使用环境变量 `OPENAI_API_KEY`、`DEEPSEEK_API_KEY` 或 `QXF_MCAI_API_KEY`。
 
-网络失败时，本地规划器会保底执行已明确交付的生存任务。五分钟聊天通道强制为空动作，不会自动建造、挖矿、战斗或执行命令。世界修改仍受边界、方块实体、流体和任务队列限制；OP4 能力只应在可信且已备份的世界使用。
+网络失败时，本地规划器会保底执行已明确交付的生存任务。五分钟聊天通道强制为空动作，不会自动建造、挖矿、战斗或执行命令。普通玩家无法通过龙龙借用 OP4 权限；只有玩家自身具备 OP4 且服务端启用命令时，明确下达的命令才会执行。世界修改仍受边界、方块实体、流体和任务队列限制。
 
 ## 构建
 
@@ -68,4 +77,4 @@ API 密钥保存在 Forge 服务端配置中，不通过聊天回传。也可使
 ./gradlew clean build --no-daemon
 ```
 
-输出：`build/libs/qxfmcai-11.1.0.jar`。
+输出：`build/libs/qxfmcai-12.0.0.jar`。

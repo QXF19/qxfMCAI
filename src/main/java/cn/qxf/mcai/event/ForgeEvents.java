@@ -14,6 +14,8 @@ import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
+import cn.qxf.mcai.network.RequestAgentStatusPacket;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -71,7 +73,7 @@ public final class ForgeEvents {
     public static void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             LAST_PROACTIVE.put(player.getUUID(), System.currentTimeMillis());
-            player.sendSystemMessage(Component.literal("[qxfMCAI v11.1] 轻量二维龙龙与四合一实体棋桌已就绪；按 M 打开控制台。")
+            player.sendSystemMessage(Component.literal("[qxfMCAI v12] 智慧快行已就绪：按 M 查看实时任务；U：内容直接和龙龙交流。")
                 .withStyle(ChatFormatting.AQUA));
         }
     }
@@ -79,6 +81,18 @@ public final class ForgeEvents {
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         LAST_PROACTIVE.remove(event.getEntity().getUUID());
+        AiService.clearPlayer(event.getEntity().getUUID());
+        RequestAgentStatusPacket.clearPlayer(event.getEntity().getUUID());
+    }
+
+    @SubscribeEvent
+    public static void onDimensionChanged(PlayerEvent.PlayerChangedDimensionEvent event) {
+        AiService.cancelPending(event.getEntity().getUUID());
+    }
+
+    @SubscribeEvent
+    public static void onServerStopping(ServerStoppingEvent event) {
+        AiService.shutdown(); LAST_PROACTIVE.clear(); RequestAgentStatusPacket.clear(); CompanionManager.clear();
     }
 
     @SubscribeEvent
