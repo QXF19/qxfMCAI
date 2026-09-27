@@ -2,6 +2,8 @@ package cn.qxf.mcai.server;
 
 import cn.qxf.mcai.QxfMcAi;
 import cn.qxf.mcai.ai.AgentAction;
+import cn.qxf.mcai.ai.AiService;
+import cn.qxf.mcai.config.McAiConfig;
 import cn.qxf.mcai.entity.AiCompanionEntity;
 import cn.qxf.mcai.entity.ModEntities;
 import net.minecraft.network.chat.Component;
@@ -17,8 +19,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class CompanionManager {
     private static final Map<UUID, UUID> BY_OWNER = new ConcurrentHashMap<>();
+    private static final ThreadLocal<Boolean> EXECUTING_COMMAND = ThreadLocal.withInitial(() -> false);
 
     private CompanionManager() {}
+    public static void clear() { BY_OWNER.clear(); }
 
     public static void register(AiCompanionEntity entity) {
         if (!entity.isFamilyChild() && entity.getOwnerUUID() != null) BY_OWNER.put(entity.getOwnerUUID(), entity.getUUID());
@@ -39,8 +43,10 @@ public final class CompanionManager {
     }
 
     public static AiCompanionEntity summon(ServerPlayer player) {
+        AiService.cancelPending(player.getUUID());
         AiCompanionEntity existing = find(player);
         if (existing != null) {
+            existing.cancelAllTasks();
             existing.setCompanionHidden(false);
             existing.setMode(AiCompanionEntity.Mode.FOLLOW);
             come(player, existing);
@@ -81,8 +87,10 @@ public final class CompanionManager {
     }
 
     public static void setMode(ServerPlayer player, AiCompanionEntity.Mode mode) {
+        AiService.cancelPending(player.getUUID());
         AiCompanionEntity companion = find(player);
         if (companion == null) companion = summon(player);
+        companion.cancelAllTasks();
         companion.setMode(mode);
     }
 
@@ -96,21 +104,32 @@ public final class CompanionManager {
     }
 
     public static boolean executeAuthorizedCommand(ServerPlayer player, String rawCommand) {
+        if (!player.hasPermissions(4) || !McAiConfig.ALLOW_FULL_COMMANDS.get()) {
+            player.sendSystemMessage(Component.literal("[龙龙] 执行游戏命令需要主人具有 OP4 且服务器允许命令功能。"));
+            return false;
+        }
+        if (EXECUTING_COMMAND.get()) {
+            player.sendSystemMessage(Component.literal("[龙龙] 已阻止递归调用龙龙命令。"));
+            return false;
+        }
         String command = rawCommand == null ? "" : rawCommand.trim();
         while (command.startsWith("/")) command = command.substring(1);
         if (command.isBlank() || command.length() > 512) return false;
         try {
-            int result = player.server.getCommands().performPrefixedCommand(
-                player.createCommandSourceStack().withPermission(4), command);
+            EXECUTING_COMMAND.set(true);
+            int result = player.server.getCommands().getDispatcher().execute(command,
+                player.createCommandSourceStack().withPermission(4));
             player.sendSystemMessage(Component.literal("[龙龙·最高权限] 命令已提交：/" + command));
-            QxfMcAi.LOGGER.info("龙龙为所有者 {} 执行 OP4 命令：/{}，返回值={}",
-                player.getGameProfile().getName(), command, result);
+            QxfMcAi.LOGGER.info("龙龙为所有者 {} 执行已授权命令，返回值={}",
+                player.getGameProfile().getName(), result);
             // Brigadier 的 0 也是合法返回值，不能据此把已执行命令误报为失败。
             return true;
-        } catch (RuntimeException e) {
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException | RuntimeException e) {
             player.sendSystemMessage(Component.literal("[龙龙·最高权限] 命令执行错误：" + e.getMessage()));
-            QxfMcAi.LOGGER.error("龙龙执行 OP4 命令失败：/{}", command, e);
+            QxfMcAi.LOGGER.error("龙龙执行 OP4 命令失败", e);
             return false;
+        } finally {
+            EXECUTING_COMMAND.remove();
         }
     }
 }

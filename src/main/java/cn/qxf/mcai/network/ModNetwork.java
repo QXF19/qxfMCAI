@@ -10,7 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import cn.qxf.mcai.server.CompanionManager;
 
 public final class ModNetwork {
-    private static final String PROTOCOL = "12";
+    private static final String PROTOCOL = "13";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(QxfMcAi.MOD_ID, "main"),
         () -> PROTOCOL,
@@ -48,6 +48,13 @@ public final class ModNetwork {
             GameBoardActionPacket::encode,
             GameBoardActionPacket::decode,
             GameBoardActionPacket::handle);
+        id++;
+        CHANNEL.registerMessage(id++, RequestAgentStatusPacket.class, RequestAgentStatusPacket::encode,
+            RequestAgentStatusPacket::decode, RequestAgentStatusPacket::handle,
+            java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(id, AgentStatusPacket.class, AgentStatusPacket::encode,
+            AgentStatusPacket::decode, AgentStatusPacket::handle,
+            java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
         registered = true;
     }
 

@@ -23,6 +23,7 @@ public final class LocalTaskPlanner {
 
     public static List<AgentAction> plan(String prompt) {
         String raw = prompt == null ? "" : prompt.trim();
+        if (IntentPolicy.isConversation(raw)) return List.of();
         String text = raw.toLowerCase(Locale.ROOT);
         LinkedHashMap<String, AgentAction> actions = new LinkedHashMap<>();
 
@@ -133,9 +134,14 @@ public final class LocalTaskPlanner {
             try { return Math.max(1, Math.min(64, Integer.parseInt(matcher.group(1)))); }
             catch (NumberFormatException ignored) { return fallback; }
         }
-        for (int i = 0; i < text.length(); i++) {
-            Integer value = CHINESE_NUMBERS.get(text.charAt(i));
-            if (value != null) return value;
+        Matcher chinese = Pattern.compile("([一二两三四五六七八九十]{1,3})(?:个|棵|块|座|次|条|组)").matcher(text);
+        if (chinese.find()) {
+            String number = chinese.group(1);
+            int ten = number.indexOf('十');
+            if (ten < 0) return CHINESE_NUMBERS.getOrDefault(number.charAt(0), fallback);
+            int tens = ten == 0 ? 1 : CHINESE_NUMBERS.getOrDefault(number.charAt(0), 1);
+            int units = ten + 1 < number.length() ? CHINESE_NUMBERS.getOrDefault(number.charAt(ten + 1), 0) : 0;
+            return Math.min(64, tens * 10 + units);
         }
         return fallback;
     }

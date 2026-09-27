@@ -24,6 +24,9 @@ public final class McAiCommands {
             .executes(ctx -> help(ctx.getSource()))
             .then(Commands.literal("help").executes(ctx -> help(ctx.getSource())))
             .then(Commands.literal("summon").executes(ctx -> summon(ctx.getSource())))
+            .then(Commands.literal("stop").executes(ctx -> control(ctx.getSource(), "stop")))
+            .then(Commands.literal("pause").executes(ctx -> control(ctx.getSource(), "pause")))
+            .then(Commands.literal("resume").executes(ctx -> control(ctx.getSource(), "resume")))
             .then(modeCommand("follow", AiCompanionEntity.Mode.FOLLOW))
             .then(modeCommand("stay", AiCompanionEntity.Mode.STAY))
             .then(modeCommand("guard", AiCompanionEntity.Mode.GUARD))
@@ -103,7 +106,7 @@ public final class McAiCommands {
             .then(Commands.literal("model").requires(source -> source.hasPermission(4))
                 .then(Commands.argument("模型名", StringArgumentType.greedyString())
                     .executes(ctx -> model(ctx.getSource(), StringArgumentType.getString(ctx, "模型名")))))
-            .then(Commands.literal("command")
+            .then(Commands.literal("command").requires(source -> source.hasPermission(4))
                 .then(Commands.argument("最高权限命令", StringArgumentType.greedyString())
                     .executes(ctx -> highestCommand(ctx.getSource(),
                         StringArgumentType.getString(ctx, "最高权限命令")))))
@@ -123,11 +126,11 @@ public final class McAiCommands {
     }
 
     private static int help(CommandSourceStack source) {
-        source.sendSuccess(() -> Component.literal("qxfMCAI v11.1：轻量二维毛毛龙、场景情绪、四合一实体棋桌与 AI 真实执行；按 M 打开紧凑控制台。")
+        source.sendSuccess(() -> Component.literal("qxfMCAI v12 智慧快行：即时控制、实时任务进度与轻量 AI 生存伙伴；按 M 打开控制台。")
             .withStyle(ChatFormatting.AQUA), false);
         source.sendSuccess(() -> Component.literal("常用：summon、ask、inventory、play、gomoku、chess、mine、cave、farm、hunt、build house"), false);
         source.sendSuccess(() -> Component.literal("聊天：@龙龙 你的要求；Shift+右键龙龙也可打开27格背包。"), false);
-        source.sendSuccess(() -> Component.literal("v11 固定提供 OP4 命令源；只应在私人且已备份的世界使用。")
+        source.sendSuccess(() -> Component.literal("stop 立即取消；pause 暂停；resume 恢复。游戏命令需要主人具有 OP4。")
             .withStyle(ChatFormatting.GOLD), false);
         return 1;
     }
@@ -150,9 +153,7 @@ public final class McAiCommands {
         throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         if ("stop".equals(type)) {
-            CompanionManager.applyActions(player, java.util.List.of(AgentAction.simple("stop")));
-            source.sendSuccess(() -> Component.literal("[龙龙] 已立即停止当前任务。"), false);
-            return 1;
+            return control(source, "stop");
         }
         // 快捷命令也进入同一套 API 规划链；无 API、超时或漏动作时由本地计划保底。
         AiService.ask(player, actionPrompt(type, count), false);
@@ -178,10 +179,21 @@ public final class McAiCommands {
 
     private static int come(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
+        AiService.cancelPending(player.getUUID());
         AiCompanionEntity companion = CompanionManager.find(player);
         if (companion == null) companion = CompanionManager.summon(player);
+        companion.cancelAllTasks();
         CompanionManager.come(player, companion);
-        companion.speak("我在这里～", "happy");
+        companion = CompanionManager.find(player);
+        if (companion != null) companion.speak("我在这里～", "happy");
+        return 1;
+    }
+
+    private static int control(CommandSourceStack source, String action)
+        throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        AiService.ask(source.getPlayerOrException(), switch (action) {
+            case "pause" -> "暂停任务"; case "resume" -> "恢复任务"; default -> "停止任务";
+        }, false);
         return 1;
     }
 
@@ -356,6 +368,7 @@ public final class McAiCommands {
             return 0;
         }
         McAiConfig.setProvider(normalized);
+        AiService.shutdown();
         source.sendSuccess(() -> Component.literal("AI提供商已切换为 " + normalized), true);
         return 1;
     }
@@ -363,6 +376,7 @@ public final class McAiCommands {
     private static int model(CommandSourceStack source, String value) {
         if (value.isBlank() || value.length() > 128) { source.sendFailure(Component.literal("模型名无效。")); return 0; }
         McAiConfig.setModel(value.trim());
+        AiService.shutdown();
         source.sendSuccess(() -> Component.literal("当前模型已设置为 " + value.trim()), true);
         return 1;
     }
@@ -382,6 +396,11 @@ public final class McAiCommands {
             + "，已完成任务=" + companion.getCompletedTasks()), false);
         source.sendSuccess(() -> Component.literal("轻量二维皮肤=已启用（原版玩家骨骼，无YSM），API=" + (AiService.isConfigured() ? "已配置" : "未配置")), false);
         source.sendSuccess(() -> Component.literal("隐藏装备仓=已启用（工具/武器/箭不占27格物资背包）"), false);
+        source.sendSuccess(() -> Component.literal("任务=" + companion.getTaskLabel() + " " + companion.getTaskProgress()
+            + "/" + companion.getTaskGoal() + "；暂停=" + companion.isTaskPaused() + "；队列=" + companion.getQueuedTaskLabels()
+            + "；上次结果=" + companion.getLastTaskResult()), false);
+        java.util.UUID ownerId = source.getPlayerOrException().getUUID();
+        source.sendSuccess(() -> Component.literal("AI=" + AiService.runtimeStatus(ownerId)), false);
         source.sendSuccess(() -> Component.literal("好感度=" + companion.getFavorability()
             + "，饰品=" + companion.accessorySummary() + "，五子棋=" + companion.getGomokuWins() + "胜/"
             + companion.getGomokuLosses() + "负，家庭孩子=" + companion.getChildrenCount()

@@ -10,6 +10,11 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 final class ClientPacketHandlers {
     private ClientPacketHandlers() {}
 
+    static void applyAgentStatus(AgentStatusPacket message) {
+        if (Minecraft.getInstance().screen instanceof AiControlScreen screen)
+            screen.applyAgentStatus(message);
+    }
+
     static void applyAiConfigSnapshot(AiConfigSnapshotPacket message) {
         if (Minecraft.getInstance().screen instanceof AiControlScreen screen)
             screen.applyServerSnapshot(message);
